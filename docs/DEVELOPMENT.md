@@ -54,8 +54,45 @@ docker compose --env-file .env.example run --build --rm minio-init
 | S3 bucket | `sentinel` |
 | Temporal namespace | `default` |
 
-`minio-init` 只创建 bucket；目前还没有数据库表迁移。PostgreSQL 镜像会创建业务数据库和用户，
-后续业务开发再加入 schema migrations。
+`minio-init` 只创建 bucket；PostgreSQL 镜像创建业务数据库和用户，业务表由下面的迁移命令建立。
+
+## 数据库迁移
+
+迁移通过独立 Go 入口执行，只需要 PostgreSQL。只启动数据库时可以执行：
+
+```powershell
+docker compose --env-file .env.example up -d --wait postgres
+$env:POSTGRES_DSN = "postgres://sentinel:sentinel-dev-password@127.0.0.1:5432/sentinel?sslmode=disable"
+go run ./cmd/migrate up
+go run ./cmd/migrate status
+```
+
+`up` 执行所有待应用版本，重复执行不会重新建表。`status` 显示每个内嵌迁移的状态，
+首次执行时会初始化 `sentinel_schema_version` 版本表，但不创建业务表。
+默认命令超时为 5 分钟；需要调整时使用 `go run ./cmd/migrate -timeout 10m up`。
+迁移期间使用 PostgreSQL 会话级 advisory lock，最多等待锁 60 秒，每个 SQL 迁移在事务中执行。
+API 和 Worker 启动不会隐式更改 schema，应在发布应用前单独执行 `up`。
+
+回滚最近一个版本：
+
+```powershell
+go run ./cmd/migrate down
+```
+
+首个版本的 `down` 会删除全部 17 张业务表及其数据，只应对确认可以丢弃这些数据的库执行。
+对象存储和 Temporal 数据不随数据库回滚删除。后续变更增加新的编号迁移，不修改已发布版本。
+数据表和需要由业务事务保证的规则见 [SCHEMA.md](SCHEMA.md)。
+
+数据库集成测试需要一个可用的 PostgreSQL 17 测试服务，连接用户须有 `CREATEDB` 权限：
+
+```powershell
+$env:SENTINEL_TEST_POSTGRES_DSN = "postgres://sentinel:sentinel-dev-password@127.0.0.1:5432/sentinel?sslmode=disable"
+go test -tags=integration -count=1 -v ./internal/storage/postgres
+```
+
+测试创建随机命名的独立数据库，验证并发迁移、重复执行、回滚重建、关联约束、CAS 和 outbox 行锁，
+结束后删除这个测试库。连接 URI 中指定的已有数据库只用于建立管理连接，不应用业务迁移。
+普通 `go test ./...` 不需要数据库。
 
 ## 启动 Go 进程
 

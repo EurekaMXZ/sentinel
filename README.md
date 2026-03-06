@@ -9,8 +9,10 @@
 compose.yaml              本地 PostgreSQL、MinIO、Temporal
 deploy/minio/             MinIO 和 mc 的固定版本源码构建
 docs/DEVELOPMENT.md        中间件配置、初始化及启动说明
+docs/SCHEMA.md             数据表、约束及发布事务约定
 cmd/
   api/                    Gin HTTP API 入口
+  migrate/                数据库迁移入口（up / status / down）
   agent-worker/           Agent Worker 入口
   source-worker/          Source Worker 入口
   relay-worker/           Relay Worker 入口
@@ -37,7 +39,7 @@ internal/
     config/               环境变量配置及校验
     temporal/             Temporal 连接、注册及 Worker 生命周期
   storage/
-    postgres/             PostgreSQL 连接池
+    postgres/             PostgreSQL 连接池、迁移运行器和嵌入的 SQL
     s3/                   MinIO/S3 客户端
 ```
 
@@ -54,6 +56,20 @@ PostgreSQL、MinIO 和 Temporal 均使用命名卷持久化。初始化任务创
 Temporal UI 为 `http://127.0.0.1:8233`，MinIO Console 为 `http://127.0.0.1:9001`。
 MinIO 使用固定源码版本构建，首次启动需要下载和编译依赖。
 完整配置、默认凭据、环境变量和停止方式见 [本地开发环境](docs/DEVELOPMENT.md)。
+
+## 初始化数据库
+
+中间件启动后，显式执行迁移：
+
+```powershell
+$env:POSTGRES_DSN = "postgres://sentinel:sentinel-dev-password@127.0.0.1:5432/sentinel?sslmode=disable"
+go run ./cmd/migrate up
+go run ./cmd/migrate status
+```
+
+首个迁移建立 17 张业务表，覆盖源码归档、Agent / Context、执行记录、对象索引、幂等和 outbox。
+迁移采用 Goose，嵌入程序、按版本执行、使用事务和 PostgreSQL advisory lock；API / Worker 不自动迁移。
+表结构和事务边界见 [Schema](docs/SCHEMA.md)，回滚及集成测试见 [本地开发环境](docs/DEVELOPMENT.md)。
 
 ## 启动 API
 
@@ -112,7 +128,7 @@ go run ./cmd/relay-worker
 - 模型仅通过快照 ID 查看版本、目录、文件、搜索及 diff；会话默认版本保持固定。
 - Workflow 只传递状态和引用，源码正文、模型 I/O 与大工具结果保存在对象存储。
 
-当前这些是领域类型与接口。Git 同步、归档、数据表迁移、源码读取、模型循环、Context compact、
+当前已提供基础表和迁移，其余主要是领域类型与接口。Git 同步、归档、源码读取、模型循环、Context compact、
 持久化幂等和 outbox 的业务实现尚未加入。PG、S3、OpenAI 提供独立客户端工厂，尚未接入 API/Worker；
 创建 OpenAI 客户端不会发起请求，后续使用时需明确配置 `OPENAI_API_KEY` 和 `OPENAI_MODEL`。
 
