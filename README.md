@@ -23,6 +23,7 @@ internal/
     activity/             模型调用和工具执行注册位置
     workflow/             Agent / Child Workflow 实现位置
     state.go              会话输入、恢复及 Continue-As-New 状态
+    resource.go           可选资源类型和资源读取接口
   agentctx/               Context head、CAS 和 compact 边界
   eventlog/               完整事件及索引接口
   source/
@@ -68,6 +69,7 @@ go run ./cmd/migrate status
 ```
 
 首个迁移建立 17 张业务表，覆盖源码归档、Agent / Context、执行记录、对象索引、幂等和 outbox。
+第二个迁移解除 Agent 对单一仓库 / 快照的绑定，新增两张可选资源关联表，当前共 19 张业务表。
 迁移采用 Goose，嵌入程序、按版本执行、使用事务和 PostgreSQL advisory lock；API / Worker 不自动迁移。
 表结构和事务边界见 [Schema](docs/SCHEMA.md)，回滚及集成测试见 [本地开发环境](docs/DEVELOPMENT.md)。
 
@@ -125,7 +127,8 @@ go run ./cmd/relay-worker
 - 从外部 Git 仓库同步 commit，以仓库 ID 和完整 commit SHA 标识不可变版本。
 - 本地 bare 仓库是可重建缓存；MinIO/S3 保存基线和增量 Git bundle、manifest。
 - PostgreSQL 保存快照索引、状态、归档依赖、CAS 和幂等记录。
-- 模型仅通过快照 ID 查看版本、目录、文件、搜索及 diff；会话默认版本保持固定。
+- Agent 和子 Agent 各自选择零到多个仓库、快照或文档资源，运行不要求绑定源码。
+- 模型通过明确的快照 ID 查看目录、文件、搜索及 diff；每次源码调用保存实际版本以便重试和核对证据。
 - Workflow 只传递状态和引用，源码正文、模型 I/O 与大工具结果保存在对象存储。
 
 当前已提供基础表和迁移，其余主要是领域类型与接口。Git 同步、归档、源码读取、模型循环、Context compact、

@@ -79,7 +79,11 @@ API 和 Worker 启动不会隐式更改 schema，应在发布应用前单独执�
 go run ./cmd/migrate down
 ```
 
-首个版本的 `down` 会删除全部 17 张业务表及其数据，只应对确认可以丢弃这些数据的库执行。
+当前最新版本为 2，共 19 张业务表。版本 2 的 `down` 会将可兼容的数据恢复为版本 1 的单仓库结构，
+要求每个会话和 Agent 只有一个名为 `default_source` 的快照资源，并且关联的仓库、工具、事件和
+Context 证据符合旧结构。无资源、多资源或跨仓库数据无法回退时，迁移会在事务中报错，保留版本 2。
+
+继续回滚首个版本会删除全部 17 张业务表及其数据，只应对确认可以丢弃这些数据的库执行。
 对象存储和 Temporal 数据不随数据库回滚删除。后续变更增加新的编号迁移，不修改已发布版本。
 数据表和需要由业务事务保证的规则见 [SCHEMA.md](SCHEMA.md)。
 
@@ -90,7 +94,8 @@ $env:SENTINEL_TEST_POSTGRES_DSN = "postgres://sentinel:sentinel-dev-password@127
 go test -tags=integration -count=1 -v ./internal/storage/postgres
 ```
 
-测试创建随机命名的独立数据库，验证并发迁移、重复执行、回滚重建、关联约束、CAS 和 outbox 行锁，
+测试创建随机命名的独立数据库，验证并发迁移、重复执行、旧数据资源回填、兼容回滚与不兼容回滚保护、
+无源码资源的父子 Agent、多仓库 / 多版本资源、关联约束、CAS 和 outbox 行锁，
 结束后删除这个测试库。连接 URI 中指定的已有数据库只用于建立管理连接，不应用业务迁移。
 普通 `go test ./...` 不需要数据库。
 

@@ -28,7 +28,7 @@ func TestMigrations(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 	defer cancel()
 	provider := openProvider(t, ctx, dsn)
-	assertStatus(t, ctx, provider, goose.StatePending)
+	assertStatus(t, ctx, provider, goose.StatePending, goose.StatePending)
 
 	otherProvider := openProvider(t, ctx, dsn)
 	completed := make(chan error, 2)
@@ -46,7 +46,7 @@ func TestMigrations(t *testing.T) {
 	if t.Failed() {
 		t.FailNow()
 	}
-	assertStatus(t, ctx, provider, goose.StateApplied)
+	assertStatus(t, ctx, provider, goose.StateApplied, goose.StateApplied)
 	if results, err := provider.Up(ctx); err != nil || len(results) != 0 {
 		t.Fatalf("repeated up: results=%v, err=%v", results, err)
 	}
@@ -55,25 +55,58 @@ func TestMigrations(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(pool.Close)
+	assertTableCount(t, ctx, pool, 19)
+	// An empty installation can return to V1, which lets us insert real legacy
+	// rows before testing the data migration instead of only testing empty DDL.
+	result, err := provider.Down(ctx)
+	if err != nil || result == nil || result.Source.Version != 2 {
+		t.Fatalf("empty down: result=%v, err=%v", result, err)
+	}
+	assertStatus(t, ctx, provider, goose.StateApplied, goose.StatePending)
 	assertTableCount(t, ctx, pool, 17)
 	tx, err := pool.Begin(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = tx.Rollback(context.Background()) }()
-	f := insertFixture(t, tx)
+	f := insertLegacyFixture(t, tx)
 	if err := tx.Commit(ctx); err != nil {
 		t.Fatal(err)
 	}
+	if results, err := provider.Up(ctx); err != nil || len(results) != 1 || results[0].Source.Version != 2 {
+		t.Fatalf("legacy upgrade: results=%v, err=%v", results, err)
+	}
+	assertResourceMigration(t, pool, f)
 	t.Run("constraints", func(t *testing.T) { testConstraints(t, pool, f) })
+	t.Run("resource constraints", func(t *testing.T) { testResourceConstraints(t, pool, f) })
+	t.Run("resource-free parent and child", func(t *testing.T) { testResourceFreeRuntime(t, pool, f) })
+	t.Run("independent multiple resources", func(t *testing.T) { testMultipleResources(t, pool, f) })
 	t.Run("head CAS", func(t *testing.T) { testHeadCAS(t, pool, f) })
 	t.Run("outbox concurrent readers", func(t *testing.T) { testOutboxLocks(t, pool, f) })
 
-	result, err := provider.Down(ctx)
-	if err != nil || result == nil || result.Source.Version != 1 {
+	result, err = provider.Down(ctx)
+	if err != nil || result == nil || result.Source.Version != 2 {
 		t.Fatalf("down: result=%v, err=%v", result, err)
 	}
-	assertStatus(t, ctx, provider, goose.StatePending)
+	assertStatus(t, ctx, provider, goose.StateApplied, goose.StatePending)
+	assertTableCount(t, ctx, pool, 17)
+	var repository, sessionSnapshot, agentSnapshot, headSnapshot string
+	err = pool.QueryRow(ctx, `SELECT s.repository_id::text, s.default_source_snapshot_id::text,
+		a.source_snapshot_id::text, h.source_snapshot_id::text
+		FROM agent_sessions s JOIN agents a ON a.session_id = s.session_id
+		JOIN agent_head h ON h.agent_id = a.agent_id WHERE a.agent_id = $1`, f.agent).
+		Scan(&repository, &sessionSnapshot, &agentSnapshot, &headSnapshot)
+	if err != nil || repository != f.repository || sessionSnapshot != f.snapshot || agentSnapshot != f.snapshot || headSnapshot != f.snapshot {
+		t.Fatalf("legacy bindings restored: repo=%s session=%s agent=%s head=%s err=%v", repository, sessionSnapshot, agentSnapshot, headSnapshot, err)
+	}
+	if _, err := provider.Up(ctx); err != nil {
+		t.Fatalf("upgrade after legacy downgrade: %v", err)
+	}
+	assertResourceMigration(t, pool, f)
+	if results, err := provider.DownTo(ctx, 0); err != nil || len(results) != 2 {
+		t.Fatalf("full down: results=%v, err=%v", results, err)
+	}
+	assertStatus(t, ctx, provider, goose.StatePending, goose.StatePending)
 	assertTableCount(t, ctx, pool, 0)
 	if _, err := provider.Down(ctx); !errors.Is(err, goose.ErrNoNextVersion) {
 		t.Fatalf("down at version zero: %v", err)
@@ -81,8 +114,8 @@ func TestMigrations(t *testing.T) {
 	if _, err := provider.Up(ctx); err != nil {
 		t.Fatalf("up after down: %v", err)
 	}
-	assertStatus(t, ctx, provider, goose.StateApplied)
-	assertTableCount(t, ctx, pool, 17)
+	assertStatus(t, ctx, provider, goose.StateApplied, goose.StateApplied)
+	assertTableCount(t, ctx, pool, 19)
 }
 
 func isolatedDatabase(t *testing.T) string {
@@ -132,14 +165,19 @@ func openProvider(t *testing.T, ctx context.Context, dsn string) *goose.Provider
 	return provider
 }
 
-func assertStatus(t *testing.T, ctx context.Context, p *goose.Provider, want goose.State) {
+func assertStatus(t *testing.T, ctx context.Context, p *goose.Provider, want ...goose.State) {
 	t.Helper()
 	statuses, err := p.Status(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(statuses) != 1 || statuses[0].Source.Version != 1 || statuses[0].State != want {
-		t.Fatalf("migration status: got %+v, want version 1 %s", statuses, want)
+	if len(statuses) != len(want) {
+		t.Fatalf("migration count: got %d, want %d", len(statuses), len(want))
+	}
+	for i, state := range want {
+		if statuses[i].Source.Version != int64(i+1) || statuses[i].State != state {
+			t.Fatalf("migration status: got %+v, want version %d %s", statuses[i], i+1, state)
+		}
 	}
 }
 
@@ -158,10 +196,11 @@ type fixture struct {
 	tenant, repository, sync, manifest, snapshot, session, agent string
 	contextRecord, childAgent, childContextRecord, tool, event   string
 	compaction, outbox, contextObject, deltaObject, segment      string
-	otherTenantObject, otherRepositorySnapshot, extraSnapshot    string
+	otherTenantObject, otherRepository, otherRepositorySnapshot  string
+	extraSnapshot                                                string
 }
 
-func insertFixture(t *testing.T, tx pgx.Tx) fixture {
+func insertLegacyFixture(t *testing.T, tx pgx.Tx) fixture {
 	t.Helper()
 	f := fixture{
 		tenant: newID(t), repository: newID(t), sync: newID(t), manifest: newID(t),
@@ -202,12 +241,12 @@ func insertFixture(t *testing.T, tx pgx.Tx) fixture {
 			snapshot.id, f.tenant, f.repository, snapshot.commit, tree, f.manifest)
 	}
 	// SHA-256 repositories are accepted without truncating Git OIDs to SHA-1.
-	otherRepository := newID(t)
+	f.otherRepository = newID(t)
 	f.otherRepositorySnapshot = newID(t)
 	mustExec(t, tx, `INSERT INTO source_repositories (repository_id, tenant_id, remote_url, object_format)
-		VALUES ($1, $2, 'https://example.test/sha256.git', 'sha256')`, otherRepository, f.tenant)
+		VALUES ($1, $2, 'https://example.test/sha256.git', 'sha256')`, f.otherRepository, f.tenant)
 	mustExec(t, tx, `INSERT INTO source_snapshots (snapshot_id, tenant_id, repository_id, commit_sha, tree_sha)
-		VALUES ($1, $2, $3, $4, $5)`, f.otherRepositorySnapshot, f.tenant, otherRepository,
+		VALUES ($1, $2, $3, $4, $5)`, f.otherRepositorySnapshot, f.tenant, f.otherRepository,
 		strings.Repeat("d", 64), strings.Repeat("e", 64))
 	mustExec(t, tx, `INSERT INTO agent_sessions
 		(session_id, tenant_id, repository_id, default_source_snapshot_id, task_object_id)
@@ -300,7 +339,7 @@ func testConstraints(t *testing.T, pool *pgxpool.Pool, f fixture) {
 	}{
 		{"cross tenant object", "23503", `UPDATE tool_executions SET result_object_id = $1 WHERE tool_execution_id = $2`,
 			[]any{f.otherTenantObject, f.tool}},
-		{"cross repository session snapshot", "23503", `UPDATE agent_sessions SET default_source_snapshot_id = $1 WHERE session_id = $2`,
+		{"cross repository session resource", "23503", `UPDATE session_resource_bindings SET source_snapshot_id = $1 WHERE session_id = $2`,
 			[]any{f.otherRepositorySnapshot, f.session}},
 		{"cross repository archive head", "23503", `UPDATE source_repositories SET archive_head_id = $1, archive_version = 1
 			WHERE repository_id = (SELECT repository_id FROM source_snapshots WHERE snapshot_id = $2)`,
@@ -322,8 +361,8 @@ func testConstraints(t *testing.T, pool *pgxpool.Pool, f fixture) {
 			[]any{f.childAgent}},
 		{"parent tool must be paired", "23514", `UPDATE agents SET parent_tool_execution_id = NULL WHERE agent_id = $1`,
 			[]any{f.childAgent}},
-		{"head preserves pinned snapshot", "23503", `UPDATE agent_head SET source_snapshot_id = $1 WHERE agent_id = $2`,
-			[]any{f.extraSnapshot, f.agent}},
+		{"head belongs to tenant", "23503", `UPDATE agent_head SET tenant_id = $1 WHERE agent_id = $2`,
+			[]any{newID(t), f.agent}},
 		{"head context coverage", "23514", `UPDATE agent_head SET context_event_sequence = 2 WHERE agent_id = $1`,
 			[]any{f.agent}},
 		{"head snapshot belongs to agent", "23503", `UPDATE agent_head SET snapshot_record_id = $1 WHERE agent_id = $2`,
@@ -331,10 +370,10 @@ func testConstraints(t *testing.T, pool *pgxpool.Pool, f fixture) {
 		{"delta base belongs to agent", "23503", `UPDATE context_records SET kind = 'delta', base_snapshot_record_id = $1
 			WHERE context_record_id = $2`, []any{f.childContextRecord, f.contextRecord}},
 		{"unique context version", "23505", `INSERT INTO context_records
-			(context_record_id, tenant_id, repository_id, agent_id, context_version, kind, object_id, from_event_sequence, through_event_sequence)
-			SELECT $1, tenant_id, repository_id, agent_id, context_version, kind, object_id, from_event_sequence, through_event_sequence
+			(context_record_id, tenant_id, agent_id, context_version, kind, object_id, from_event_sequence, through_event_sequence)
+			SELECT $1, tenant_id, agent_id, context_version, kind, object_id, from_event_sequence, through_event_sequence
 			FROM context_records WHERE context_record_id = $2`, []any{newID(t), f.contextRecord}},
-		{"one default source per context", "23505", `INSERT INTO context_source_refs
+		{"one default source per repository in context", "23505", `INSERT INTO context_source_refs
 			(tenant_id, repository_id, context_record_id, source_snapshot_id, role) VALUES ($1, $2, $3, $4, 'default')`,
 			[]any{f.tenant, f.repository, f.contextRecord, f.extraSnapshot}},
 		{"event sequence deduplication", "23505", `INSERT INTO event_index
@@ -399,10 +438,10 @@ func testConstraints(t *testing.T, pool *pgxpool.Pool, f fixture) {
 			(tenant_id, repository_id, sync_id, ref_name, is_deleted) VALUES ($1, $2, $3, 'refs/heads/deleted', true)`,
 			f.tenant, f.repository, f.sync)
 		mustExec(t, tx, `INSERT INTO context_records
-			(context_record_id, tenant_id, repository_id, agent_id, context_version, kind, object_id,
+			(context_record_id, tenant_id, agent_id, context_version, kind, object_id,
 			base_snapshot_record_id, from_event_sequence, through_event_sequence)
-			VALUES ($1, $2, $3, $4, 2, 'delta', $5, $6, 1, 1)`,
-			newID(t), f.tenant, f.repository, f.agent, f.deltaObject, f.contextRecord)
+			VALUES ($1, $2, $3, 2, 'delta', $4, $5, 1, 1)`,
+			newID(t), f.tenant, f.agent, f.deltaObject, f.contextRecord)
 	})
 }
 
