@@ -4,13 +4,21 @@ import (
 	"context"
 	"log/slog"
 
+	"go.temporal.io/sdk/worker"
+
 	"sentinel/internal/platform/config"
 	"sentinel/internal/platform/temporal"
 )
 
-// Register the Agent Workflows and Activities here when the runtime is implemented.
 func RunAgentWorker(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
-	return temporal.RunWorker(ctx, cfg.Temporal, cfg.Temporal.AgentTaskQueue, cfg.ShutdownTimeout, logger, nil)
+	activities, closeRuntime, err := openAgentRuntime(ctx, cfg)
+	if err != nil {
+		return err
+	}
+	defer closeRuntime()
+	return temporal.RunWorker(ctx, cfg.Temporal, cfg.Temporal.AgentTaskQueue, cfg.ShutdownTimeout, logger, func(registry worker.Registry) {
+		registerAgent(registry, activities)
+	})
 }
 
 // Register source synchronization and read-only snapshot Activities here.

@@ -1,0 +1,124 @@
+package activity
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"time"
+
+	openaigo "github.com/openai/openai-go/v3"
+	"github.com/openai/openai-go/v3/responses"
+
+	"sentinel/internal/agent"
+	"sentinel/internal/eventlog"
+	modelapi "sentinel/internal/llm/openai"
+)
+
+func (a *Activities) Checkpoint(ctx context.Context, input agent.StepInput) (agent.Progress, error) {
+	record, task, err := a.load(ctx, input.Session)
+	if err != nil {
+		return agent.Progress{}, err
+	}
+	step, err := a.Store.LoadStep(ctx, input)
+	if err != nil {
+		return agent.Progress{}, runtimeError("load_step_checkpoint", err)
+	}
+	if step.Status == "succeeded" {
+		return progress(record, task), nil
+	}
+	if record.Head.NextStepID != input.StepID || step.Status != "response_saved" || record.Status != "running" {
+		return agent.Progress{}, permanent("checkpoint_cursor_mismatch")
+	}
+	var request struct {
+		Input []json.RawMessage `json:"input"`
+	}
+	var response responses.Response
+	if err := a.getJSON(ctx, input.Session.TenantID, step.RequestRef, &request); err != nil {
+		return agent.Progress{}, err
+	}
+	if err := a.getJSON(ctx, input.Session.TenantID, step.ResponseRef, &response); err != nil {
+		return agent.Progress{}, err
+	}
+	calls, err := a.responseCalls(ctx, input.Session.TenantID, task, response)
+	if err != nil {
+		return agent.Progress{}, err
+	}
+	output, err := modelapi.OutputAsInput(response.Output)
+	if err != nil {
+		return agent.Progress{}, permanent("invalid_response_context")
+	}
+	items := request.Input
+	for _, item := range output {
+		raw, err := json.Marshal(item)
+		if err != nil {
+			return agent.Progress{}, permanent("invalid_response_context")
+		}
+		items = append(items, raw)
+	}
+	checkpoint := agent.Checkpoint{Step: input, ToolCount: len(calls), ExpectedHead: record.Head, ContextRecordID: newID()}
+	now := time.Now().UTC()
+	appendEvent := func(kind, operationID, ref string) {
+		checkpoint.Events = append(checkpoint.Events, eventlog.Event{EventID: newID(), TenantID: input.Session.TenantID,
+			AgentID: input.Session.AgentID, OperationID: operationID, Sequence: record.Head.LastEventSequence + int64(len(checkpoint.Events)) + 1,
+			Type: kind, PayloadRef: ref, CreatedAt: now})
+	}
+	appendEvent("model_request", step.OperationID, step.RequestRef)
+	appendEvent("model_response", step.OperationID, step.ResponseRef)
+	for _, call := range calls {
+		tool, err := a.Store.LoadTool(ctx, agent.ToolInput{Step: input, Call: call})
+		if err != nil {
+			return agent.Progress{}, runtimeError("load_checkpoint_tool", err)
+		}
+		if tool.ResultRef == "" || (tool.Status != "succeeded" && tool.Status != "failed") {
+			return agent.Progress{}, permanent("incomplete_tool_result")
+		}
+		data, err := a.Payloads.Get(ctx, input.Session.TenantID, tool.ResultRef)
+		if err != nil {
+			return agent.Progress{}, err
+		}
+		item := responses.ResponseInputItemParamOfFunctionCallOutput(string(data))
+		item.OfFunctionCallOutput.CallID = openaigo.String(call.CallID)
+		raw, err := json.Marshal(item)
+		if err != nil {
+			return agent.Progress{}, permanent("invalid_tool_context")
+		}
+		items = append(items, raw)
+		metadataRef, err := a.putJSON(ctx, input.Session.TenantID, "tool-execution", planFor(tool))
+		if err != nil {
+			return agent.Progress{}, err
+		}
+		appendEvent("assistant_tool_call", tool.OperationID, call.ArgumentsRef)
+		appendEvent("tool_execution", tool.OperationID, metadataRef)
+		appendEvent("tool_result", tool.OperationID, tool.ResultRef)
+	}
+	if len(calls) == 0 {
+		checkpoint.ResultRef, err = a.putJSON(ctx, input.Session.TenantID, "agent-result", StructuredResult{
+			AgentID: input.Session.AgentID, Summary: responseSummary(response), ResponseRef: step.ResponseRef,
+			Artifacts: []string{}, SourceRefs: []json.RawMessage{}})
+		if err != nil {
+			return agent.Progress{}, err
+		}
+		appendEvent("agent_completed", step.OperationID, checkpoint.ResultRef)
+	}
+	checkpoint.ContextRef, err = a.putJSON(ctx, input.Session.TenantID, "agent-context", ContextSnapshot{
+		Version: record.Head.ContextVersion + 1, Items: items, Resources: record.Resources})
+	if err != nil {
+		return agent.Progress{}, err
+	}
+	var segment bytes.Buffer
+	encoder := json.NewEncoder(&segment)
+	for _, event := range checkpoint.Events {
+		if err := encoder.Encode(event); err != nil {
+			return agent.Progress{}, permanent("invalid_event_segment")
+		}
+	}
+	checkpoint.SegmentRef, err = a.Payloads.Put(ctx, input.Session.TenantID, "event-segment", segment.Bytes())
+	if err != nil {
+		return agent.Progress{}, err
+	}
+	record, err = a.Store.CommitStep(ctx, checkpoint)
+	if err != nil {
+		return agent.Progress{}, runtimeError("commit_step", err)
+	}
+	return progress(record, task), nil
+}

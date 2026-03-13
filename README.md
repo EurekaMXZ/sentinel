@@ -1,7 +1,7 @@
 # Sentinel
 
 基于 Go、Gin、Temporal、PostgreSQL、MinIO/S3 和 OpenAI API 的只读源码分析系统。
-设计依据见 [提案](docs/PROPOSAL.md)。当前为项目骨架。
+设计依据见 [提案](docs/PROPOSAL.md)。已实现 Agent 模型循环、独立子 Agent 和持久化恢复；源码服务仍在建设中。
 
 ## 目录
 
@@ -10,8 +10,10 @@ compose.yaml              本地 PostgreSQL、MinIO、Temporal
 deploy/minio/             MinIO 和 mc 的固定版本源码构建
 docs/DEVELOPMENT.md        中间件配置、初始化及启动说明
 docs/SCHEMA.md             数据表、约束及发布事务约定
+docs/AGENT_RUNTIME.md      Agent 启动、SDK 调用与恢复边界
 cmd/
   api/                    Gin HTTP API 入口
+  agent/                  创建、等待或重新连接根 Agent 的 CLI
   migrate/                数据库迁移入口（up / status / down）
   agent-worker/           Agent Worker 入口
   source-worker/          Source Worker 入口
@@ -20,8 +22,8 @@ internal/
   app/                    依赖组装和进程生命周期
   api/                    Gin 路由、handler 和中间件
   agent/
-    activity/             模型调用和工具执行注册位置
-    workflow/             Agent / Child Workflow 实现位置
+    activity/             模型请求、工具派发、Context 和检查点
+    workflow/             通用 Agent / Child Workflow
     state.go              会话输入、恢复及 Continue-As-New 状态
     resource.go           可选资源类型和资源读取接口
   agentctx/               Context head、CAS 和 compact 边界
@@ -35,13 +37,14 @@ internal/
     reader.go             目录、文件、搜索和版本差异接口
     archive.go            bundle 清单及恢复接口
   relay/                  outbox、事件索引和重试实现位置
-  llm/openai/             OpenAI SDK 客户端配置
+  llm/openai/             官方 OpenAI SDK Responses 适配
+  payload/                租户隔离的不可变正文存储接口
   platform/
     config/               环境变量配置及校验
     temporal/             Temporal 连接、注册及 Worker 生命周期
   storage/
-    postgres/             PostgreSQL 连接池、迁移运行器和嵌入的 SQL
-    s3/                   MinIO/S3 客户端
+    postgres/             迁移、Agent 事务、执行记录和对象索引
+    s3/                   MinIO/S3 客户端和压缩正文存储
 ```
 
 ## 启动中间件
@@ -118,9 +121,18 @@ go run ./cmd/relay-worker
 这些命令应分别在独立终端运行。默认连接 `127.0.0.1:7233`、namespace `default`，
 分别使用 `sentinel-agent`、`sentinel-source`、`sentinel-relay` task queue。
 
-当前 Worker 仅验证 Temporal 连接并等待退出，尚未注册 Workflow/Activity，因此不轮询任务。
-业务实现完成后，在 `internal/app/worker.go` 为各入口传入注册函数。
+Agent Worker 已注册 Workflow / Activity，会轮询任务。启动前需要执行数据库迁移、创建 S3 bucket，
+并配置 PostgreSQL、S3 和 OpenAI 环境变量。Source / Relay Worker 仍只验证 Temporal 连接并等待退出。
 统一运行器负责启动、错误传播和停止 Worker。
+
+配置好相同环境变量后，可在另一个终端创建任务：
+
+```powershell
+go run ./cmd/agent -tenant "0194e229-8576-7f42-8f08-3496913847cf" -task "说明只读源码分析可以怎样拆分任务" -wait
+```
+
+CLI 先输出持久化的会话、Agent 和 Workflow ID，`-wait` 再输出结果引用和摘要。
+完整环境配置、子 Agent 机制和恢复方法见 [Agent 运行说明](docs/AGENT_RUNTIME.md)。
 
 ## 源码和存储边界
 
@@ -131,9 +143,10 @@ go run ./cmd/relay-worker
 - 模型通过明确的快照 ID 查看目录、文件、搜索及 diff；每次源码调用保存实际版本以便重试和核对证据。
 - Workflow 只传递状态和引用，源码正文、模型 I/O 与大工具结果保存在对象存储。
 
-当前已提供基础表和迁移，其余主要是领域类型与接口。Git 同步、归档、源码读取、模型循环、Context compact、
-持久化幂等和 outbox 的业务实现尚未加入。PG、S3、OpenAI 提供独立客户端工厂，尚未接入 API/Worker；
-创建 OpenAI 客户端不会发起请求，后续使用时需明确配置 `OPENAI_API_KEY` 和 `OPENAI_MODEL`。
+模型请求通过已有的官方 `openai-go/v3` SDK 发往 Responses API。请求、原始响应、工具结果和 Context
+保存在 S3，PostgreSQL 保存引用、幂等状态、租约、检查点及 outbox。Temporal History 只携带引用和游标。
+当前工具集提供 `call_child_agent`；Git 同步、归档、源码读取工具、Context compact、outbox 消费和业务 API
+尚未实现。资源绑定不会自动读取资源正文。创建 SDK 客户端不会发起模型请求。
 
 ## 开发检查
 

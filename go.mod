@@ -9,6 +9,7 @@ require (
 	github.com/minio/minio-go/v7 v7.4.1
 	github.com/openai/openai-go/v3 v3.82.0
 	github.com/pressly/goose/v3 v3.27.3
+	go.temporal.io/api v1.63.5
 	go.temporal.io/sdk v1.50.0
 )
 
@@ -66,7 +67,6 @@ require (
 	github.com/ugorji/go/codec v1.3.1 // indirect
 	github.com/zeebo/xxh3 v1.1.0 // indirect
 	go.mongodb.org/mongo-driver/v2 v2.5.0 // indirect
-	go.temporal.io/api v1.63.5 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	go.yaml.in/yaml/v3 v3.0.5 // indirect
 	golang.org/x/arch v0.22.0 // indirect
