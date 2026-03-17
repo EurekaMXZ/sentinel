@@ -95,7 +95,8 @@ go test -tags=integration -count=1 -v ./internal/storage/postgres
 ```
 
 测试创建随机命名的独立数据库，验证并发迁移、重复执行、旧数据资源回填、兼容回滚与不兼容回滚保护、
-无源码资源的父子 Agent、多仓库 / 多版本资源、关联约束、模型请求恢复、工具结果、租约 fencing、CAS 和 outbox 行锁，
+无源码资源的父子 Agent、多仓库 / 多版本资源、关联约束、模型请求恢复、工具结果、租约 fencing、CAS、outbox 行锁，
+以及 Git 基线 / 增量恢复、强推后版本保留、源码发布重试和损坏归档拦截，
 结束后删除这个测试库。连接 URI 中指定的已有数据库只用于建立管理连接，不应用业务迁移。
 普通 `go test ./...` 不需要数据库。
 
@@ -129,12 +130,15 @@ go run ./cmd/relay-worker
 ```
 
 每个终端需要各自设置所需环境变量。Agent Worker 已接入 PG、S3 和官方 OpenAI SDK，
-注册通用 Agent Workflow 和模型、工具、检查点等 Activity。Source / Relay Worker 仍只验证 Temporal 连接并等待退出。
+注册通用 Agent Workflow 和模型、工具、检查点等 Activity。Source Worker 已接入原生 Git、PG 和 S3，
+注册源码同步及失败清理 Activity；它需要安装 Git，并可通过 `GIT_BINARY` 指定可执行文件。
+Relay Worker 仍只验证 Temporal 连接并等待退出。
 API 的 `/healthz` 仅表示 HTTP 进程存活；业务 HTTP API 尚未加入。
 
 模型接口使用外部服务。启动 Agent Worker 和 Agent CLI 的终端还须设置 `OPENAI_API_KEY`、`OPENAI_MODEL`；
 需要自定义 Responses API 地址时设置 `OPENAI_BASE_URL`，无需为它增加 Compose 服务。
 创建任务、等待结果及恢复已有 Agent 的命令见 [AGENT_RUNTIME.md](AGENT_RUNTIME.md)。
+源码导入、后续同步和私有 GitHub 仓库凭据配置见 [SOURCE_SYNC.md](SOURCE_SYNC.md)。
 
 若以后把 Go 进程放进同一个 Compose 网络，连接地址改用容器服务名：
 

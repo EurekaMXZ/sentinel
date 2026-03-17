@@ -21,9 +21,15 @@ func RunAgentWorker(ctx context.Context, cfg config.Config, logger *slog.Logger)
 	})
 }
 
-// Register source synchronization and read-only snapshot Activities here.
 func RunSourceWorker(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
-	return temporal.RunWorker(ctx, cfg.Temporal, cfg.Temporal.SourceTaskQueue, cfg.ShutdownTimeout, logger, nil)
+	activities, closeRuntime, err := openSourceRuntime(ctx, cfg)
+	if err != nil {
+		return err
+	}
+	defer closeRuntime()
+	return temporal.RunWorker(ctx, cfg.Temporal, cfg.Temporal.SourceTaskQueue, cfg.ShutdownTimeout, logger, func(registry worker.Registry) {
+		registerSource(registry, activities)
+	})
 }
 
 // Register outbox and event-index Activities here when the relay is implemented.

@@ -17,15 +17,16 @@ type Store interface {
 }
 
 type Object struct {
-	ID       string
-	TenantID string
-	Kind     string
-	Bucket   string
-	Key      string
-	Version  string
-	Checksum []byte
-	Size     int64
-	Codec    string
+	ID        string
+	TenantID  string
+	Kind      string
+	Bucket    string
+	Key       string
+	Version   string
+	Checksum  []byte
+	Size      int64
+	Codec     string
+	MediaType string
 }
 
 type Index interface {

@@ -53,6 +53,7 @@ func (m *memoryIndex) Load(_ context.Context, tenantID, ref string) (payload.Obj
 
 type objectFixture struct {
 	store    *storage.PayloadStore
+	archives *storage.ArchiveStore
 	index    *memoryIndex
 	mu       sync.Mutex
 	objects  map[string][]byte
@@ -109,6 +110,7 @@ func newObjectFixture(t *testing.T) *objectFixture {
 		t.Fatal(err)
 	}
 	f.store = storage.NewPayloadStore(client, "runtime-test", f.index)
+	f.archives = storage.NewArchiveStore(client, "runtime-test", f.index, 32<<20)
 	return f
 }
 

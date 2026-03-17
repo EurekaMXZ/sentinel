@@ -58,8 +58,9 @@ type OpenAI struct {
 }
 
 type Source struct {
-	GitBinary string
-	CacheDir  string
+	GitBinary      string
+	CacheDir       string
+	MaxBundleBytes int64
 }
 
 func Load() (Config, error) {
@@ -104,8 +105,9 @@ func load(lookup func(string) (string, bool)) (Config, error) {
 			RequestTimeout: 2 * time.Minute,
 		},
 		Source: Source{
-			GitBinary: env("GIT_BINARY", "git"),
-			CacheDir:  env("SOURCE_CACHE_DIR", "var/git"),
+			GitBinary:      env("GIT_BINARY", "git"),
+			CacheDir:       env("SOURCE_CACHE_DIR", "var/git"),
+			MaxBundleBytes: 512 << 20,
 		},
 		ShutdownTimeout: 10 * time.Second,
 	}
@@ -135,6 +137,13 @@ func load(lookup func(string) (string, bool)) (Config, error) {
 			return Config{}, fmt.Errorf("S3_USE_TLS must be a boolean")
 		}
 		cfg.S3.UseTLS = value
+	}
+	if raw := env("SOURCE_MAX_BUNDLE_BYTES", ""); raw != "" {
+		value, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil || value <= 0 || value > 5<<30 {
+			return Config{}, fmt.Errorf("SOURCE_MAX_BUNDLE_BYTES must be between 1 and 5368709120")
+		}
+		cfg.Source.MaxBundleBytes = value
 	}
 	for _, address := range []struct {
 		key   string

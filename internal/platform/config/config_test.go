@@ -58,6 +58,9 @@ func TestLoadRejectsInvalidConfiguration(t *testing.T) {
 		{"S3_USE_TLS", "sometimes"},
 		{"HTTP_ADDR", "localhost"},
 		{"TEMPORAL_ADDRESS", "localhost"},
+		{"SOURCE_MAX_BUNDLE_BYTES", "0"},
+		{"SOURCE_MAX_BUNDLE_BYTES", "5368709121"},
+		{"SOURCE_MAX_BUNDLE_BYTES", "invalid"},
 	} {
 		t.Run(test.key, func(t *testing.T) {
 			_, err := load(lookup(map[string]string{test.key: test.value}))
