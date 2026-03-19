@@ -18,6 +18,7 @@ const (
 	ExecuteActivity    = "sentinel.agent.execute_tool"
 	CompleteActivity   = "sentinel.agent.complete_tool"
 	CheckpointActivity = "sentinel.agent.checkpoint"
+	CompactActivity    = "sentinel.agent.compact"
 	FinishActivity     = "sentinel.agent.finish"
 	ChildToolName      = "call_child_agent"
 )
@@ -32,27 +33,48 @@ var (
 
 // Limits are saved with the task, so recovery does not change a running Agent's policy.
 type Limits struct {
-	MaxSteps           int64         `json:"max_steps"`
-	ContinueAfterSteps int           `json:"continue_after_steps"`
-	MaxChildDepth      int           `json:"max_child_depth"`
-	MaxToolCalls       int           `json:"max_tool_calls"`
-	MaxContextBytes    int           `json:"max_context_bytes"`
-	MaxOutputTokens    int64         `json:"max_output_tokens"`
-	ModelTimeout       time.Duration `json:"model_timeout"`
+	MaxSteps            int64         `json:"max_steps"`
+	ContinueAfterSteps  int           `json:"continue_after_steps"`
+	MaxChildDepth       int           `json:"max_child_depth"`
+	MaxToolCalls        int           `json:"max_tool_calls"`
+	MaxContextBytes     int           `json:"max_context_bytes"`
+	MaxOutputTokens     int64         `json:"max_output_tokens"`
+	ContextWindowTokens int64         `json:"context_window_tokens"`
+	ContextSafetyTokens int64         `json:"context_safety_tokens"`
+	ModelTimeout        time.Duration `json:"model_timeout"`
 }
 
 func DefaultLimits() Limits {
 	return Limits{MaxSteps: 64, ContinueAfterSteps: 16, MaxChildDepth: 3,
 		MaxToolCalls: 16, MaxContextBytes: 4 << 20, MaxOutputTokens: 8192,
+		ContextWindowTokens: 128000, ContextSafetyTokens: 8192,
 		ModelTimeout: 2 * time.Minute}
+}
+
+// WithDefaults fills compact budget fields missing from tasks persisted before
+// automatic compaction existed. Existing policy fields are never rewritten.
+func (l Limits) WithDefaults() Limits {
+	defaults := DefaultLimits()
+	if l.ContextWindowTokens == 0 {
+		l.ContextWindowTokens = defaults.ContextWindowTokens
+	}
+	if l.ContextSafetyTokens == 0 {
+		l.ContextSafetyTokens = defaults.ContextSafetyTokens
+	}
+	return l
 }
 
 func (l Limits) Validate() error {
 	if l.MaxSteps < 1 || l.MaxSteps > 10000 || l.ContinueAfterSteps < 1 || l.ContinueAfterSteps > 1000 ||
 		l.MaxChildDepth < 0 || l.MaxChildDepth > 8 || l.MaxToolCalls < 1 || l.MaxToolCalls > 32 ||
 		l.MaxContextBytes < 1024 || l.MaxContextBytes > 8<<20 || l.MaxOutputTokens < 1 ||
+		l.ContextWindowTokens < 4096 || l.ContextWindowTokens > 10_000_000 ||
+		l.ContextSafetyTokens < 1 || l.ContextSafetyTokens >= l.ContextWindowTokens ||
 		l.ModelTimeout <= 0 || l.ModelTimeout > 30*time.Minute {
 		return errors.New("invalid Agent execution limits")
+	}
+	if l.MaxOutputTokens+l.ContextSafetyTokens >= l.ContextWindowTokens {
+		return errors.New("context window must exceed output and safety reserves")
 	}
 	return nil
 }
@@ -83,10 +105,12 @@ type InitializeInput struct {
 }
 
 type Progress struct {
-	State     RuntimeState `json:"state"`
-	Limits    Limits       `json:"limits"`
-	Completed bool         `json:"completed"`
-	ResultRef string       `json:"result_ref,omitempty"`
+	State         RuntimeState `json:"state"`
+	Limits        Limits       `json:"limits"`
+	Completed     bool         `json:"completed"`
+	ResultRef     string       `json:"result_ref,omitempty"`
+	NeedsCompact  bool         `json:"needs_compact,omitempty"`
+	ContextTokens int64        `json:"context_tokens,omitempty"`
 }
 
 type StepInput struct {
@@ -201,6 +225,17 @@ type RuntimeStore interface {
 	SaveToolResult(context.Context, ToolRecord) (ToolRecord, error)
 	CommitStep(context.Context, Checkpoint) (AgentRecord, error)
 	FinishAgent(context.Context, FinishInput, string) error
+
+	LoadCompact(context.Context, CompactInput) (CompactRecord, error)
+	PrepareCompact(context.Context, CompactRecord) (CompactRecord, error)
+	ClaimCompact(context.Context, CompactInput, string, time.Duration) (CompactRecord, error)
+	SaveCompactResponse(context.Context, CompactRecord) error
+	ReleaseCompact(context.Context, CompactRecord, string, string) error
+	PublishCompact(context.Context, CompactPublication) (AgentRecord, error)
+	CurrentEvidence(context.Context, string, string, string) ([]SourceRef, error)
+	ValidateSourceRefs(context.Context, string, []SourceRef) error
+	ValidateToolArtifacts(context.Context, string, []string) error
+	IsCompactedContext(context.Context, string, string, string) (bool, error)
 }
 
 func ModelOperation(agentID string, stepID int64) string {

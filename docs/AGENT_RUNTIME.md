@@ -21,6 +21,8 @@ $env:TEMPORAL_NAMESPACE = "default"
 $env:OPENAI_API_KEY = "填入 API key"
 $env:OPENAI_MODEL = "填入可访问的模型 ID"
 $env:OPENAI_REQUEST_TIMEOUT = "2m"
+$env:OPENAI_CONTEXT_WINDOW_TOKENS = "128000"
+$env:OPENAI_CONTEXT_SAFETY_TOKENS = "8192"
 ```
 
 默认使用 SDK 的 OpenAI 服务地址；自定义地址通过 `OPENAI_BASE_URL` 配置，须支持 Responses API 和 function calling。
@@ -117,14 +119,43 @@ go run ./cmd/agent -tenant "0194e229-8576-7f42-8f08-3496913847cf" -resume "已�
 它不替换任务、资源或限制，也不重新启动已失败 / 已取消的 Agent。子 Agent 由父 Workflow 调度。
 Worker 正常退出或暂时不可用时，Temporal 保留历史并在 Worker 恢复后继续派发任务。
 
+## Context Compact
+
+每次 `Initialize` 和 `Checkpoint` 都会估算下一次模型请求的 token 数。超过预算时，
+Workflow 在下一次模型调用前执行 `sentinel.agent.compact`：
+
+```text
+估算输入 tokens + MaxOutputTokens + ContextSafetyTokens > OPENAI_CONTEXT_WINDOW_TOKENS
+```
+
+- 常规路径使用上一步响应返回的真实 `input_tokens`，只按字节估算该步新增的消息和工具结果；
+  恢复时没有 usage，则按完整请求字节估算。
+- Compact 使用同一次普通 Responses API 调用，不启用工具，要求模型返回严格 JSON 摘要：
+  任务要求、约束、决策、当前状态、未决项、错误、子 Agent 结果、产物和源码引用。
+- 摘要渲染为一条 user message，成为新 Context Snapshot 的唯一内容；原始事件、模型请求和响应全部保留。
+- 服务端保留 instructions、工具策略、资源绑定和权限，模型输出不能扩大它们；源码引用须属于
+  Agent 的资源委派范围或当前已有证据，产物引用须是已校验的 `tool-result` 对象。
+- 新 Context 记录覆盖全部已产生事件（`from_event_sequence=1`、`through_event_sequence=last_event_sequence`），
+  `agent_head.context_version` 和 `row_version` 各递增一次，`next_step_id` 与事件游标不变。
+- Compact 使用 `agent_id+source_row_version` 派生的稳定 operation ID、租约和 fencing token。
+  已保存的响应可以复用；head 在发布前变化时旧候选标记为 `stale`，Activity 重试时按最新 head 新建操作。
+  429 恢复为 `pending` 重试；其他明确 4xx 或非法摘要失败；网络、超时、408/409/5xx 标为 `uncertain`，
+  不自动重发。
+- 摘要类别各最多 64 条、单条最多 8 KiB、总计最多 64 KiB；Compact 输出最多 4096 tokens。
+  压缩后仍超过预算时明确失败，不发布新 Context。
+
+`OPENAI_CONTEXT_WINDOW_TOKENS`、`OPENAI_CONTEXT_SAFETY_TOKENS` 随任务保存为执行限制。
+不支持 JSON Schema 结构化输出的兼容端点可设置 `OPENAI_COMPACT_STRUCTURED_OUTPUT=false`，
+服务端仍会严格校验摘要。
+
 ## 当前限制与检查
 
 默认限制按每个 Agent 计算：最多 64 次模型步骤、每次最多 16 个工具调用、子 Agent 深度最多 3、
 完整请求最多 4 MiB、模型输出最多 8192 tokens。`-max-steps`、`-max-child-depth` 可在创建根任务时调整；
 深度为 0 时不向模型提供子 Agent 工具。`OPENAI_REQUEST_TIMEOUT` 最大为 30 分钟。
 
-当前每步保存完整 Context Snapshot；尚未实现 delta、token 估算和自动 compact，超过请求字节预算会明确失败。
-Git 同步、源码读取工具、Source Worker、outbox 消费及业务 HTTP API 仍待实现。
+当前每步保存完整 Context Snapshot，尚未实现 delta；token 估算为保守近似，不使用模型专用 tokenizer。
+源码读取工具、outbox 消费及业务 HTTP API 仍待实现。
 结构化结果中的源码证据及产物数组目前为空，不会生成未经工具验证的源码位置。
 
 ```powershell

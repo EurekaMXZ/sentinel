@@ -36,10 +36,11 @@ type ToolRequest struct {
 }
 
 type Activities struct {
-	Store    agent.RuntimeStore
-	Payloads payload.Store
-	Model    Model
-	Tools    map[string]Tool
+	Store                   agent.RuntimeStore
+	Payloads                payload.Store
+	Model                   Model
+	Tools                   map[string]Tool
+	CompactStructuredOutput bool
 }
 
 type ContextSnapshot struct {
@@ -76,7 +77,22 @@ func (a *Activities) Initialize(ctx context.Context, input agent.InitializeInput
 	if err != nil {
 		return agent.Progress{}, runtimeError("start_agent", err)
 	}
-	return progress(record, task), nil
+	result := progress(record, task)
+	if record.Status == "running" && record.Head.SnapshotRef != "" {
+		var snapshot ContextSnapshot
+		if err := a.getJSON(ctx, input.Session.TenantID, record.Head.SnapshotRef, &snapshot); err != nil {
+			return agent.Progress{}, err
+		}
+		if snapshot.Version != record.Head.ContextVersion {
+			return agent.Progress{}, permanent("context_version_mismatch")
+		}
+		assessment, err := a.assessBudget(task, snapshot.Items, 0, 0)
+		if err != nil {
+			return agent.Progress{}, err
+		}
+		result.NeedsCompact, result.ContextTokens = assessment.NeedsCompact, assessment.ContextTokens
+	}
+	return result, nil
 }
 
 // CreateRoot saves the task and resources before the Workflow is scheduled.
@@ -87,6 +103,7 @@ func (a *Activities) CreateRoot(ctx context.Context, tenantID string, task agent
 	}
 	task.Depth = 0
 	task.DelegationScope = resources
+	task.Limits = task.Limits.WithDefaults()
 	if err := a.validateTask(task); err != nil {
 		return agent.AgentRecord{}, err
 	}
@@ -122,6 +139,7 @@ func (a *Activities) load(ctx context.Context, input agent.SessionInput) (agent.
 	if err := a.getJSON(ctx, input.TenantID, input.TaskRef, &task); err != nil {
 		return record, task, err
 	}
+	task.Limits = task.Limits.WithDefaults()
 	if err := a.validateTask(task); err != nil {
 		return record, task, err
 	}
@@ -162,7 +180,8 @@ func (a *Activities) validateTask(task agent.Task) error {
 
 func progress(record agent.AgentRecord, task agent.Task) agent.Progress {
 	return agent.Progress{State: agent.RuntimeState{TenantID: record.Input.TenantID, SessionID: record.Input.SessionID,
-		AgentID: record.Input.AgentID, ContextVersion: record.Head.ContextVersion, LastEventSequence: record.Head.LastEventSequence,
+		AgentID: record.Input.AgentID, RowVersion: record.Head.RowVersion,
+		ContextVersion: record.Head.ContextVersion, LastEventSequence: record.Head.LastEventSequence,
 		NextStepID: record.Head.NextStepID}, Limits: task.Limits, Completed: record.Status == "completed", ResultRef: record.ResultRef}
 }
 

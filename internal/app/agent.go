@@ -55,7 +55,8 @@ func openAgentRuntime(ctx context.Context, cfg config.Config) (*activity.Activit
 		return nil, nil, err
 	}
 	return &activity.Activities{Store: postgres.NewAgentStore(pool), Model: model,
-		Payloads: s3.NewPayloadStore(objectClient, cfg.S3.Bucket, postgres.NewPayloadIndex(pool))}, pool.Close, nil
+		Payloads:                s3.NewPayloadStore(objectClient, cfg.S3.Bucket, postgres.NewPayloadIndex(pool)),
+		CompactStructuredOutput: cfg.OpenAI.CompactStructuredOutput}, pool.Close, nil
 }
 
 func registerAgent(registry worker.Registry, activities *activity.Activities) {
@@ -67,7 +68,7 @@ func registerAgent(registry worker.Registry, activities *activity.Activities) {
 		{agent.InitializeActivity, activities.Initialize}, {agent.ModelActivity, activities.ModelStep},
 		{agent.PrepareActivity, activities.PrepareTool}, {agent.ExecuteActivity, activities.ExecuteTool},
 		{agent.CompleteActivity, activities.CompleteTool}, {agent.CheckpointActivity, activities.Checkpoint},
-		{agent.FinishActivity, activities.Finish},
+		{agent.CompactActivity, activities.Compact}, {agent.FinishActivity, activities.Finish},
 	} {
 		registry.RegisterActivityWithOptions(registration.fn, sdkactivity.RegisterOptions{Name: registration.name})
 	}
@@ -110,6 +111,8 @@ func StartAgent(ctx context.Context, cfg config.Config, logger *slog.Logger, opt
 		record, err = activities.Store.LoadAgent(ctx, options.TenantID, options.ResumeID)
 	} else {
 		options.Limits.ModelTimeout = cfg.OpenAI.RequestTimeout
+		options.Limits.ContextWindowTokens = cfg.OpenAI.ContextWindowTokens
+		options.Limits.ContextSafetyTokens = cfg.OpenAI.ContextSafetyTokens
 		record, err = activities.CreateRoot(ctx, options.TenantID, agent.Task{
 			Prompt: options.Prompt, InitialContextRef: options.ContextRef, Model: cfg.OpenAI.Model,
 			Instructions: "You are Sentinel, a task-oriented Agent. Use only available tools. Resource bindings identify inputs, not their contents. Delegate bounded tasks only when useful. Report what you could verify and what remains unknown.",

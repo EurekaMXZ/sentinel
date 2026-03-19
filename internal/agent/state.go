@@ -15,6 +15,7 @@ type RuntimeState struct {
 	TenantID           string `json:"tenant_id"`
 	SessionID          string `json:"session_id"`
 	AgentID            string `json:"agent_id"`
+	RowVersion         int64  `json:"row_version"`
 	ContextVersion     int64  `json:"context_version"`
 	LastEventSequence  int64  `json:"last_event_sequence"`
 	PendingOperationID string `json:"pending_operation_id,omitempty"`

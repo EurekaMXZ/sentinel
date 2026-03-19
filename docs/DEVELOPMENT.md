@@ -118,6 +118,19 @@ $env:GIN_MODE = "release"
 go run ./cmd/api
 ```
 
+Agent Worker 和 Agent CLI 还需要 OpenAI 配置：
+
+```powershell
+$env:OPENAI_API_KEY = "填入 API key"
+$env:OPENAI_MODEL = "填入可访问的模型 ID"
+$env:OPENAI_CONTEXT_WINDOW_TOKENS = "128000"
+$env:OPENAI_CONTEXT_SAFETY_TOKENS = "8192"
+```
+
+`OPENAI_CONTEXT_WINDOW_TOKENS` 和 `OPENAI_CONTEXT_SAFETY_TOKENS` 定义自动 Context compact 的预算；
+`OPENAI_COMPACT_STRUCTURED_OUTPUT=false` 可关闭 Compact 请求的 JSON Schema 输出。
+未配置或无法访问模型时 API、Source Worker 和 Relay Worker 仍可独立启动。
+
 `S3_ENDPOINT` 不带 `http://` 前缀。更改 `.env` 的数据库或 MinIO 凭据时，也应同步修改终端环境变量；
 数据库用户名、密码或库名包含 URI 特殊字符时，DSN 中需要 URL 编码。
 

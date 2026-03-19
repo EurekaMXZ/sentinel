@@ -51,10 +51,13 @@ type S3 struct {
 }
 
 type OpenAI struct {
-	APIKey         string
-	BaseURL        string
-	Model          string
-	RequestTimeout time.Duration
+	APIKey                  string
+	BaseURL                 string
+	Model                   string
+	RequestTimeout          time.Duration
+	ContextWindowTokens     int64
+	ContextSafetyTokens     int64
+	CompactStructuredOutput bool
 }
 
 type Source struct {
@@ -99,10 +102,13 @@ func load(lookup func(string) (string, bool)) (Config, error) {
 			SecretKey: env("S3_SECRET_KEY", ""),
 		},
 		OpenAI: OpenAI{
-			APIKey:         env("OPENAI_API_KEY", ""),
-			BaseURL:        env("OPENAI_BASE_URL", ""),
-			Model:          env("OPENAI_MODEL", ""),
-			RequestTimeout: 2 * time.Minute,
+			APIKey:                  env("OPENAI_API_KEY", ""),
+			BaseURL:                 env("OPENAI_BASE_URL", ""),
+			Model:                   env("OPENAI_MODEL", ""),
+			RequestTimeout:          2 * time.Minute,
+			ContextWindowTokens:     128000,
+			ContextSafetyTokens:     8192,
+			CompactStructuredOutput: true,
 		},
 		Source: Source{
 			GitBinary:      env("GIT_BINARY", "git"),
@@ -144,6 +150,30 @@ func load(lookup func(string) (string, bool)) (Config, error) {
 			return Config{}, fmt.Errorf("SOURCE_MAX_BUNDLE_BYTES must be between 1 and 5368709120")
 		}
 		cfg.Source.MaxBundleBytes = value
+	}
+	if raw := env("OPENAI_CONTEXT_WINDOW_TOKENS", ""); raw != "" {
+		value, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil || value < 4096 || value > 10_000_000 {
+			return Config{}, fmt.Errorf("OPENAI_CONTEXT_WINDOW_TOKENS must be between 4096 and 10000000")
+		}
+		cfg.OpenAI.ContextWindowTokens = value
+	}
+	if raw := env("OPENAI_CONTEXT_SAFETY_TOKENS", ""); raw != "" {
+		value, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil || value < 1 {
+			return Config{}, fmt.Errorf("OPENAI_CONTEXT_SAFETY_TOKENS must be positive")
+		}
+		cfg.OpenAI.ContextSafetyTokens = value
+	}
+	if cfg.OpenAI.ContextSafetyTokens >= cfg.OpenAI.ContextWindowTokens {
+		return Config{}, fmt.Errorf("OPENAI_CONTEXT_SAFETY_TOKENS must be smaller than OPENAI_CONTEXT_WINDOW_TOKENS")
+	}
+	if raw := env("OPENAI_COMPACT_STRUCTURED_OUTPUT", ""); raw != "" {
+		value, err := strconv.ParseBool(raw)
+		if err != nil {
+			return Config{}, fmt.Errorf("OPENAI_COMPACT_STRUCTURED_OUTPUT must be a boolean")
+		}
+		cfg.OpenAI.CompactStructuredOutput = value
 	}
 	for _, address := range []struct {
 		key   string

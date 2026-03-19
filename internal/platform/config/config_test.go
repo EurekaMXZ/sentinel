@@ -27,21 +27,30 @@ func TestLoadDefaultsAllowAPIWithoutExternalServices(t *testing.T) {
 	if cfg.OpenAI.APIKey != "" || cfg.OpenAI.Model != "" || cfg.Postgres.DSN != "" {
 		t.Fatal("credentials and model selection must be explicitly configured")
 	}
+	if cfg.OpenAI.ContextWindowTokens != 128000 || cfg.OpenAI.ContextSafetyTokens != 8192 || !cfg.OpenAI.CompactStructuredOutput {
+		t.Fatalf("unexpected context compact defaults: %+v", cfg.OpenAI)
+	}
 }
 
 func TestLoadOverrides(t *testing.T) {
 	cfg, err := load(lookup(map[string]string{
-		"HTTP_ADDR":          "[::1]:9090",
-		"HTTP_READ_TIMEOUT":  "45s",
-		"TEMPORAL_NAMESPACE": "analysis",
-		"S3_USE_TLS":         "true",
-		"SHUTDOWN_TIMEOUT":   "20s",
+		"HTTP_ADDR":                        "[::1]:9090",
+		"HTTP_READ_TIMEOUT":                "45s",
+		"TEMPORAL_NAMESPACE":               "analysis",
+		"S3_USE_TLS":                       "true",
+		"SHUTDOWN_TIMEOUT":                 "20s",
+		"OPENAI_CONTEXT_WINDOW_TOKENS":     "64000",
+		"OPENAI_CONTEXT_SAFETY_TOKENS":     "4096",
+		"OPENAI_COMPACT_STRUCTURED_OUTPUT": "false",
 	}))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if cfg.HTTP.Address != "[::1]:9090" || cfg.HTTP.ReadTimeout != 45*time.Second || !cfg.S3.UseTLS || cfg.ShutdownTimeout != 20*time.Second || cfg.Temporal.Namespace != "analysis" {
 		t.Fatal("environment overrides were not applied")
+	}
+	if cfg.OpenAI.ContextWindowTokens != 64000 || cfg.OpenAI.ContextSafetyTokens != 4096 || cfg.OpenAI.CompactStructuredOutput {
+		t.Fatalf("context compact overrides were not applied: %+v", cfg.OpenAI)
 	}
 }
 
@@ -61,6 +70,10 @@ func TestLoadRejectsInvalidConfiguration(t *testing.T) {
 		{"SOURCE_MAX_BUNDLE_BYTES", "0"},
 		{"SOURCE_MAX_BUNDLE_BYTES", "5368709121"},
 		{"SOURCE_MAX_BUNDLE_BYTES", "invalid"},
+		{"OPENAI_CONTEXT_WINDOW_TOKENS", "1000"},
+		{"OPENAI_CONTEXT_SAFETY_TOKENS", "0"},
+		{"OPENAI_CONTEXT_SAFETY_TOKENS", "128000"},
+		{"OPENAI_COMPACT_STRUCTURED_OUTPUT", "sometimes"},
 	} {
 		t.Run(test.key, func(t *testing.T) {
 			_, err := load(lookup(map[string]string{test.key: test.value}))

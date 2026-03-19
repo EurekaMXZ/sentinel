@@ -159,37 +159,55 @@ func (a *Activities) send(ctx context.Context, task agent.Task, step agent.StepR
 }
 
 func (a *Activities) buildRequest(ctx context.Context, record agent.AgentRecord, task agent.Task) (responses.ResponseNewParams, error) {
+	items, err := a.inputItems(ctx, record, task)
+	if err != nil {
+		return responses.ResponseNewParams{}, err
+	}
+	return a.modelRequest(task, items), nil
+}
+
+func (a *Activities) inputItems(ctx context.Context, record agent.AgentRecord, task agent.Task) ([]responses.ResponseInputItemUnionParam, error) {
 	var items []responses.ResponseInputItemUnionParam
 	if record.Head.SnapshotRef != "" {
 		var snapshot ContextSnapshot
 		if err := a.getJSON(ctx, record.Input.TenantID, record.Head.SnapshotRef, &snapshot); err != nil {
-			return responses.ResponseNewParams{}, err
+			return nil, err
 		}
 		if snapshot.Version != record.Head.ContextVersion {
-			return responses.ResponseNewParams{}, permanent("context_version_mismatch")
+			return nil, permanent("context_version_mismatch")
 		}
-		for _, raw := range snapshot.Items {
-			items = append(items, param.Override[responses.ResponseInputItemUnionParam](raw))
-		}
-	} else {
-		if task.InitialContextRef != "" {
-			var initial InitialContext
-			if err := a.getJSON(ctx, record.Input.TenantID, task.InitialContextRef, &initial); err != nil {
-				return responses.ResponseNewParams{}, err
-			}
-			items = append(items, responses.ResponseInputItemParamOfMessage("Initial context:\n"+initial.Text, responses.EasyInputMessageRoleUser))
-		}
-		text := task.Prompt
-		if task.ExpectedOutput != "" {
-			text += "\n\nExpected output:\n" + task.ExpectedOutput
-		}
-		resources, err := json.Marshal(record.Resources)
-		if err != nil {
-			return responses.ResponseNewParams{}, err
-		}
-		text += "\n\nResource bindings (identifiers only; use available tools to read content):\n" + string(resources)
-		items = append(items, responses.ResponseInputItemParamOfMessage(text, responses.EasyInputMessageRoleUser))
+		items = append(items, rawInputItems(snapshot.Items)...)
+		return items, nil
 	}
+	if task.InitialContextRef != "" {
+		var initial InitialContext
+		if err := a.getJSON(ctx, record.Input.TenantID, task.InitialContextRef, &initial); err != nil {
+			return nil, err
+		}
+		items = append(items, responses.ResponseInputItemParamOfMessage("Initial context:\n"+initial.Text, responses.EasyInputMessageRoleUser))
+	}
+	text := task.Prompt
+	if task.ExpectedOutput != "" {
+		text += "\n\nExpected output:\n" + task.ExpectedOutput
+	}
+	resources, err := json.Marshal(record.Resources)
+	if err != nil {
+		return nil, err
+	}
+	text += "\n\nResource bindings (identifiers only; use available tools to read content):\n" + string(resources)
+	items = append(items, responses.ResponseInputItemParamOfMessage(text, responses.EasyInputMessageRoleUser))
+	return items, nil
+}
+
+func rawInputItems(raw []json.RawMessage) []responses.ResponseInputItemUnionParam {
+	items := make([]responses.ResponseInputItemUnionParam, 0, len(raw))
+	for _, item := range raw {
+		items = append(items, param.Override[responses.ResponseInputItemUnionParam](item))
+	}
+	return items
+}
+
+func (a *Activities) modelRequest(task agent.Task, items []responses.ResponseInputItemUnionParam) responses.ResponseNewParams {
 	request := responses.ResponseNewParams{
 		Model: shared.ResponsesModel(task.Model), Instructions: openaigo.String(task.Instructions),
 		Input: responses.ResponseNewParamsInputUnion{OfInputItemList: items}, Store: openaigo.Bool(false),
@@ -208,7 +226,7 @@ func (a *Activities) buildRequest(ctx context.Context, record agent.AgentRecord,
 			request.Tools = append(request.Tools, responses.ToolUnionParam{OfFunction: &definition})
 		}
 	}
-	return request, nil
+	return request
 }
 
 func (a *Activities) responseCalls(ctx context.Context, tenantID string, task agent.Task, response responses.Response) ([]agent.ToolCall, error) {

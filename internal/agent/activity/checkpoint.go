@@ -48,11 +48,13 @@ func (a *Activities) Checkpoint(ctx context.Context, input agent.StepInput) (age
 		return agent.Progress{}, permanent("invalid_response_context")
 	}
 	items := request.Input
+	appendedBytes := 0
 	for _, item := range output {
 		raw, err := json.Marshal(item)
 		if err != nil {
 			return agent.Progress{}, permanent("invalid_response_context")
 		}
+		appendedBytes += len(raw)
 		items = append(items, raw)
 	}
 	checkpoint := agent.Checkpoint{Step: input, ToolCount: len(calls), ExpectedHead: record.Head, ContextRecordID: newID()}
@@ -82,6 +84,7 @@ func (a *Activities) Checkpoint(ctx context.Context, input agent.StepInput) (age
 		if err != nil {
 			return agent.Progress{}, permanent("invalid_tool_context")
 		}
+		appendedBytes += len(raw)
 		items = append(items, raw)
 		metadataRef, err := a.putJSON(ctx, input.Session.TenantID, "tool-execution", planFor(tool))
 		if err != nil {
@@ -120,5 +123,13 @@ func (a *Activities) Checkpoint(ctx context.Context, input agent.StepInput) (age
 	if err != nil {
 		return agent.Progress{}, runtimeError("commit_step", err)
 	}
-	return progress(record, task), nil
+	result := progress(record, task)
+	if checkpoint.ResultRef == "" && record.Status == "running" {
+		assessment, err := a.assessBudget(task, items, appendedBytes, step.InputTokens)
+		if err != nil {
+			return agent.Progress{}, err
+		}
+		result.NeedsCompact, result.ContextTokens = assessment.NeedsCompact, assessment.ContextTokens
+	}
+	return result, nil
 }

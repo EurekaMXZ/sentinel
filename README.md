@@ -1,7 +1,7 @@
 # Sentinel
 
 基于 Go、Gin、Temporal、PostgreSQL、MinIO/S3 和 OpenAI API 的只读源码分析系统。
-设计依据见 [提案](docs/PROPOSAL.md)。已实现 Agent 模型循环、独立子 Agent、持久化恢复，以及 GitHub 源码拉取和增量归档。
+设计依据见 [提案](docs/PROPOSAL.md)。已实现 Agent 模型循环、独立子 Agent、持久化恢复、自动 Context compact，以及 GitHub 源码拉取和增量归档。
 
 ## 目录
 
@@ -158,8 +158,8 @@ CLI 输出仓库、同步和 Workflow ID；`-wait` 等待归档发布并输出�
 
 模型请求通过已有的官方 `openai-go/v3` SDK 发往 Responses API。请求、原始响应、工具结果和 Context
 保存在 S3，PostgreSQL 保存引用、幂等状态、租约、检查点及 outbox。Temporal History 只携带引用和游标。
-当前工具集提供 `call_child_agent`；GitHub 同步和归档已实现，源码读取工具、Context compact、outbox 消费和业务 API
-尚未实现。资源绑定不会自动读取资源正文。创建 SDK 客户端不会发起模型请求。
+当前工具集提供 `call_child_agent`；GitHub 同步和归档已实现，Agent 支持按 token 预算自动 compact Context。
+源码读取工具、outbox 消费和业务 API 尚未实现。资源绑定不会自动读取资源正文。创建 SDK 客户端不会发起模型请求。
 
 ## 开发检查
 

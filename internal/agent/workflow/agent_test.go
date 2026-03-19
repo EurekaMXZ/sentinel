@@ -20,19 +20,24 @@ import (
 )
 
 type workflowHarness struct {
-	mu          sync.Mutex
-	limits      agent.Limits
-	startStep   int64
-	toolNames   []string
-	modelSteps  []string
-	tools       []string
-	children    []string
-	finished    []agent.FinishInput
-	modelError  error
-	blockModel  bool
-	blockChild  bool
-	childFails  bool
-	childFailed bool
+	mu              sync.Mutex
+	limits          agent.Limits
+	startStep       int64
+	toolNames       []string
+	modelSteps      []string
+	tools           []string
+	children        []string
+	finished        []agent.FinishInput
+	modelError      error
+	blockModel      bool
+	blockChild      bool
+	childFails      bool
+	childFailed     bool
+	sequence        []string
+	compactAtStep   int64
+	compactNextStep int64
+	compactErr      error
+	compactCalls    int
 }
 
 func newEnvironment(h *workflowHarness) *testsuite.TestWorkflowEnvironment {
@@ -55,6 +60,7 @@ func newEnvironment(h *workflowHarness) *testsuite.TestWorkflowEnvironment {
 	register(agent.ModelActivity, func(ctx context.Context, input agent.StepInput) (agent.ModelResult, error) {
 		h.mu.Lock()
 		h.modelSteps = append(h.modelSteps, fmt.Sprintf("%s:%d", input.Session.AgentID, input.StepID))
+		h.sequence = append(h.sequence, fmt.Sprintf("model:%s:%d", input.Session.AgentID, input.StepID))
 		failure, block := h.modelError, h.blockModel
 		if input.Session.AgentID == "child" && h.childFails {
 			failure = temporal.NewNonRetryableApplicationError("child_failed", "child_failed", nil)
@@ -111,9 +117,28 @@ func newEnvironment(h *workflowHarness) *testsuite.TestWorkflowEnvironment {
 	})
 	register(agent.CheckpointActivity, func(ctx context.Context, input agent.StepInput) (agent.Progress, error) {
 		completed := input.Session.AgentID == "child" || input.StepID > 1 || len(h.toolNames) == 0
+		h.mu.Lock()
+		needsCompact := h.compactAtStep != 0 && input.StepID == h.compactAtStep
+		h.mu.Unlock()
 		return agent.Progress{Limits: h.limits, Completed: completed, ResultRef: input.Session.AgentID + "-result",
+			NeedsCompact: needsCompact,
 			State: agent.RuntimeState{TenantID: input.Session.TenantID, SessionID: input.Session.SessionID,
 				AgentID: input.Session.AgentID, NextStepID: input.StepID + 1, ContextVersion: input.StepID, LastEventSequence: input.StepID * 5}}, nil
+	})
+	register(agent.CompactActivity, func(ctx context.Context, input agent.CompactInput) (agent.Progress, error) {
+		h.mu.Lock()
+		h.compactCalls++
+		h.sequence = append(h.sequence, "compact")
+		failure, next := h.compactErr, h.compactNextStep
+		h.mu.Unlock()
+		if failure != nil {
+			return agent.Progress{}, failure
+		}
+		if next == 0 {
+			next = 1
+		}
+		return agent.Progress{Limits: h.limits, State: agent.RuntimeState{TenantID: input.Session.TenantID,
+			SessionID: input.Session.SessionID, AgentID: input.Session.AgentID, NextStepID: next}}, nil
 	})
 	register(agent.FinishActivity, func(ctx context.Context, input agent.FinishInput) error {
 		h.mu.Lock()
@@ -165,6 +190,37 @@ func TestAgentLoopAndIndependentChild(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestCompactRunsBeforeNextModelStep(t *testing.T) {
+	h := &workflowHarness{limits: agent.DefaultLimits(), toolNames: []string{"first"},
+		compactAtStep: 1, compactNextStep: 2}
+	env := newEnvironment(h)
+	env.ExecuteWorkflow(agent.WorkflowName, workflowInput())
+	if err := env.GetWorkflowError(); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"model:root:1", "compact", "model:root:2"}
+	if h.compactCalls != 1 || !reflect.DeepEqual(h.sequence, want) {
+		t.Fatalf("compact calls=%d sequence=%v want=%v", h.compactCalls, h.sequence, want)
+	}
+}
+
+func TestCompactFailureStopsTheAgent(t *testing.T) {
+	h := &workflowHarness{limits: agent.DefaultLimits(), toolNames: []string{"first"},
+		compactAtStep: 1, compactNextStep: 2,
+		compactErr: temporal.NewNonRetryableApplicationError("compact failed", "compact_failed", nil)}
+	env := newEnvironment(h)
+	env.ExecuteWorkflow(agent.WorkflowName, workflowInput())
+	if env.GetWorkflowError() == nil || h.compactCalls != 1 {
+		t.Fatalf("err=%v compact calls=%d", env.GetWorkflowError(), h.compactCalls)
+	}
+	if !reflect.DeepEqual(h.modelSteps, []string{"root:1"}) {
+		t.Fatalf("model ran after compaction failed: %v", h.modelSteps)
+	}
+	if len(h.finished) != 1 || h.finished[0].Status != "failed" {
+		t.Fatalf("terminal status not persisted: %+v", h.finished)
 	}
 }
 

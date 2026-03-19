@@ -54,6 +54,18 @@ func AgentSessionWorkflow(ctx workflow.Context, input agent.WorkflowInput) (resu
 		if progress.State.NextStepID < 1 || progress.State.NextStepID > progress.Limits.MaxSteps {
 			return result, temporal.NewNonRetryableApplicationError("step_budget_exhausted", "step_budget_exhausted", nil)
 		}
+		if progress.NeedsCompact {
+			var compacted agent.Progress
+			if err := workflow.ExecuteActivity(modelCtx, agent.CompactActivity, agent.CompactInput{
+				Session: input.Session, RowVersion: progress.State.RowVersion}).Get(ctx, &compacted); err != nil {
+				return result, err
+			}
+			if compacted.NeedsCompact {
+				return result, temporal.NewNonRetryableApplicationError("context_compact_ineffective", "context_compact_ineffective", nil)
+			}
+			progress = compacted
+			continue
+		}
 		step := agent.StepInput{Session: input.Session, StepID: progress.State.NextStepID}
 		var response agent.ModelResult
 		if err := workflow.ExecuteActivity(modelCtx, agent.ModelActivity, step).Get(ctx, &response); err != nil {

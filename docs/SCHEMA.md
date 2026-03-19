@@ -131,6 +131,11 @@ compact 候选保存在 `compaction_jobs`；保存模型响应后可复用。只
 才新增 Context 记录、源码引用并推进 head。失败的候选标记 `stale`，最新 head 对应新的逻辑 compact 操作。
 compact 不删除完整历史事件。
 
+Compact 发布新增一条 `kind='snapshot'` 的 Context 记录，覆盖从事件 1 到当前 `last_event_sequence`；
+它只推进 `agent_head.context_version` 和 `row_version`，`last_event_sequence`、`context_event_sequence`
+与 `next_step_id` 保持不变，也不写入新的 `event_index` 行。`compaction_jobs` 从 `response_saved`
+变为 `published`；发布前 head 已变化的候选标记为 `stale`，不发布新 Context。
+
 `response_saved` 表示响应已归档；`uncertain` 表示远端可能已经执行但本地没有可确认结果。
 幂等键、请求摘要和已保存响应用于重放恢复，不能据此声称外部模型调用 exactly once。
 
