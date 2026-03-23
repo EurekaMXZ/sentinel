@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -19,6 +20,34 @@ var _ agent.RuntimeStore = (*AgentStore)(nil)
 var _ agent.ResourceStore = (*AgentStore)(nil)
 
 func NewAgentStore(pool *pgxpool.Pool) *AgentStore { return &AgentStore{pool: pool} }
+
+// LoadSourceSnapshot resolves a snapshot's repository and readiness for the
+// Agent-side dispatcher. The Source Worker repeats this check before reading.
+func (s *AgentStore) LoadSourceSnapshot(ctx context.Context, tenantID, snapshotID string) (string, string, error) {
+	var repositoryID, status string
+	err := s.pool.QueryRow(ctx, `SELECT repository_id::text,status FROM source_snapshots
+		WHERE tenant_id=$1 AND snapshot_id=$2`, tenantID, snapshotID).Scan(&repositoryID, &status)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", "", agent.ErrNotFound
+	}
+	return repositoryID, status, err
+}
+
+func (s *AgentStore) ValidateStoredObject(ctx context.Context, tenantID, ref, kind string) error {
+	if id, err := uuid.Parse(ref); err != nil || id == uuid.Nil {
+		return errors.New("invalid stored object reference")
+	}
+	var verified bool
+	err := s.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM stored_objects
+		WHERE tenant_id=$1 AND object_id=$2 AND kind=$3 AND status='verified')`, tenantID, ref, kind).Scan(&verified)
+	if err != nil {
+		return err
+	}
+	if !verified {
+		return errors.New("stored object is not verified for this tenant and purpose")
+	}
+	return nil
+}
 
 func (s *AgentStore) LoadAgent(ctx context.Context, tenantID, agentID string) (agent.AgentRecord, error) {
 	var record agent.AgentRecord

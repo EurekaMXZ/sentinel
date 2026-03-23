@@ -49,9 +49,10 @@ func (b ResourceBinding) Validate() error {
 	return nil
 }
 
-// CanDelegate checks a server-assigned scope separately from the Agent's inputs.
-func CanDelegate(scope []ResourceBinding, resource ResourceBinding) bool {
-	for _, allowed := range scope {
+// CanAccess checks whether a resource is inside a server-assigned set. It is
+// used for an Agent's own inputs and, with a smaller scope, for delegation.
+func CanAccess(resources []ResourceBinding, resource ResourceBinding) bool {
+	for _, allowed := range resources {
 		switch allowed.Kind {
 		case ResourceSourceRepository:
 			if resource.RepositoryID == allowed.RepositoryID &&
@@ -69,6 +70,23 @@ func CanDelegate(scope []ResourceBinding, resource ResourceBinding) bool {
 		}
 	}
 	return false
+}
+
+// CanAccessRepository checks repository-scoped tools such as version listing.
+// A snapshot binding implicitly identifies its repository.
+func CanAccessRepository(resources []ResourceBinding, repositoryID string) bool {
+	for _, binding := range resources {
+		if binding.RepositoryID == repositoryID &&
+			(binding.Kind == ResourceSourceRepository || binding.Kind == ResourceSourceSnapshot) {
+			return true
+		}
+	}
+	return false
+}
+
+// CanDelegate checks a server-assigned scope separately from the Agent's inputs.
+func CanDelegate(scope []ResourceBinding, resource ResourceBinding) bool {
+	return CanAccess(scope, resource)
 }
 
 // ResourceStore is read through Activities. Agent bindings are persisted explicitly

@@ -64,6 +64,25 @@ func (a *Activities) Checkpoint(ctx context.Context, input agent.StepInput) (age
 			AgentID: input.Session.AgentID, OperationID: operationID, Sequence: record.Head.LastEventSequence + int64(len(checkpoint.Events)) + 1,
 			Type: kind, PayloadRef: ref, CreatedAt: now})
 	}
+	appendToolEvent := func(kind, operationID, ref string, tool agent.ToolRecord) {
+		checkpoint.Events = append(checkpoint.Events, eventlog.Event{EventID: newID(), TenantID: input.Session.TenantID,
+			AgentID: input.Session.AgentID, OperationID: operationID, Sequence: record.Head.LastEventSequence + int64(len(checkpoint.Events)) + 1,
+			Type: kind, PayloadRef: ref, RepositoryID: tool.Source.RepositoryID,
+			SourceSnapshotID: tool.Source.SourceSnapshotID, BaseSnapshotID: tool.Source.BaseSnapshotID,
+			TargetSnapshotID: tool.Source.TargetSnapshotID, CreatedAt: now})
+	}
+	sourceRefs := make([]agent.ContextSourceRef, 0)
+	seenSourceRefs := make(map[agent.ContextSourceRef]bool)
+	addSourceRef := func(repositoryID, snapshotID, role string) {
+		if repositoryID == "" || snapshotID == "" {
+			return
+		}
+		ref := agent.ContextSourceRef{RepositoryID: repositoryID, SourceSnapshotID: snapshotID, Role: role}
+		if !seenSourceRefs[ref] {
+			seenSourceRefs[ref] = true
+			sourceRefs = append(sourceRefs, ref)
+		}
+	}
 	appendEvent("model_request", step.OperationID, step.RequestRef)
 	appendEvent("model_response", step.OperationID, step.ResponseRef)
 	for _, call := range calls {
@@ -90,14 +109,34 @@ func (a *Activities) Checkpoint(ctx context.Context, input agent.StepInput) (age
 		if err != nil {
 			return agent.Progress{}, err
 		}
-		appendEvent("assistant_tool_call", tool.OperationID, call.ArgumentsRef)
-		appendEvent("tool_execution", tool.OperationID, metadataRef)
-		appendEvent("tool_result", tool.OperationID, tool.ResultRef)
+		if tool.Status == "succeeded" {
+			addSourceRef(tool.Source.RepositoryID, tool.Source.SourceSnapshotID, "evidence")
+			addSourceRef(tool.Source.RepositoryID, tool.Source.BaseSnapshotID, "diff_base")
+			addSourceRef(tool.Source.RepositoryID, tool.Source.TargetSnapshotID, "diff_target")
+		}
+		appendToolEvent("assistant_tool_call", tool.OperationID, call.ArgumentsRef, tool)
+		appendToolEvent("tool_execution", tool.OperationID, metadataRef, tool)
+		appendToolEvent("tool_result", tool.OperationID, tool.ResultRef, tool)
 	}
+	checkpoint.SourceRefs = sourceRefs
 	if len(calls) == 0 {
+		resultRefs := make([]json.RawMessage, 0)
+		seenResultRefs := make(map[agent.SourceRef]bool)
+		for _, ref := range sourceRefs {
+			sourceRef := agent.SourceRef{RepositoryID: ref.RepositoryID, SourceSnapshotID: ref.SourceSnapshotID}
+			if seenResultRefs[sourceRef] {
+				continue
+			}
+			seenResultRefs[sourceRef] = true
+			data, err := json.Marshal(sourceRef)
+			if err != nil {
+				return agent.Progress{}, permanent("invalid_source_ref")
+			}
+			resultRefs = append(resultRefs, data)
+		}
 		checkpoint.ResultRef, err = a.putJSON(ctx, input.Session.TenantID, "agent-result", StructuredResult{
 			AgentID: input.Session.AgentID, Summary: responseSummary(response), ResponseRef: step.ResponseRef,
-			Artifacts: []string{}, SourceRefs: []json.RawMessage{}})
+			Artifacts: []string{}, SourceRefs: resultRefs})
 		if err != nil {
 			return agent.Progress{}, err
 		}

@@ -80,6 +80,19 @@ func (s *AgentStore) CommitStep(ctx context.Context, checkpoint agent.Checkpoint
 	if err != nil {
 		return agent.AgentRecord{}, err
 	}
+	for _, ref := range checkpoint.SourceRefs {
+		if ref.RepositoryID == "" || ref.SourceSnapshotID == "" ||
+			(ref.Role != "evidence" && ref.Role != "diff_base" && ref.Role != "diff_target") {
+			return agent.AgentRecord{}, errors.New("invalid checkpoint source reference")
+		}
+		_, err = tx.Exec(ctx, `INSERT INTO context_source_refs
+			(tenant_id,repository_id,context_record_id,source_snapshot_id,role)
+			VALUES ($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING`, input.Session.TenantID,
+			ref.RepositoryID, checkpoint.ContextRecordID, ref.SourceSnapshotID, ref.Role)
+		if err != nil {
+			return agent.AgentRecord{}, err
+		}
+	}
 	_, err = tx.Exec(ctx, `UPDATE agent_head SET row_version=row_version+1,context_version=context_version+1,
 		last_event_sequence=$3,context_event_sequence=$3,snapshot_record_id=$4,next_step_id=$5,updated_at=now()
 		WHERE tenant_id=$1 AND agent_id=$2`, input.Session.TenantID, input.Session.AgentID, through, checkpoint.ContextRecordID, input.StepID+1)

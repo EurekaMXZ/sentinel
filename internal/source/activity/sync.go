@@ -23,6 +23,7 @@ const leaseDuration = time.Minute
 
 type Activities struct {
 	Store    source.SyncStore
+	Reads    source.ReadStore
 	Payloads payload.Store
 	Archives source.ArchiveStore
 	Git      source.Git

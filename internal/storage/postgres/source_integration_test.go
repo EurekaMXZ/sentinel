@@ -143,7 +143,7 @@ func newSourceFixture(t *testing.T) *sourceFixture {
 	sourceCommand(t, f.git.remote, "init", "-b", "main")
 	sourceCommand(t, f.git.remote, "config", "user.name", "Source Test")
 	sourceCommand(t, f.git.remote, "config", "user.email", "source@example.test")
-	f.a = &sourceactivity.Activities{Store: f.store, Git: f.git,
+	f.a = &sourceactivity.Activities{Store: f.store, Reads: f.store, Git: f.git,
 		Payloads: s3.NewPayloadStore(client, "source-test", index), Archives: s3.NewArchiveStore(client, "source-test", index, 32<<20)}
 	f.repo, err = f.store.CreateRepository(t.Context(), source.Repository{ID: newID(t), TenantID: newID(t),
 		RemoteURL: "https://github.com/owner/repository.git", TrackedRefs: []string{"refs/heads/*", "refs/tags/*"}, ObjectFormat: "sha1"})

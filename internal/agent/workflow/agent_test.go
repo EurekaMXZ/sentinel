@@ -17,6 +17,7 @@ import (
 
 	"sentinel/internal/agent"
 	agentworkflow "sentinel/internal/agent/workflow"
+	"sentinel/internal/source"
 )
 
 type workflowHarness struct {
@@ -38,6 +39,10 @@ type workflowHarness struct {
 	compactNextStep int64
 	compactErr      error
 	compactCalls    int
+	sourceCalls     int
+	sourceResults   []string
+	remoteResults   []string
+	remoteFailed    []bool
 }
 
 func newEnvironment(h *workflowHarness) *testsuite.TestWorkflowEnvironment {
@@ -54,8 +59,9 @@ func newEnvironment(h *workflowHarness) *testsuite.TestWorkflowEnvironment {
 		if step == 0 || input.Session.AgentID == "child" {
 			step = 1
 		}
-		return agent.Progress{Limits: h.limits, State: agent.RuntimeState{TenantID: input.Session.TenantID,
-			SessionID: input.Session.SessionID, AgentID: input.Session.AgentID, NextStepID: step}}, nil
+		return agent.Progress{Limits: h.limits, SourceTaskQueue: "source-queue",
+			State: agent.RuntimeState{TenantID: input.Session.TenantID,
+				SessionID: input.Session.SessionID, AgentID: input.Session.AgentID, NextStepID: step}}, nil
 	})
 	register(agent.ModelActivity, func(ctx context.Context, input agent.StepInput) (agent.ModelResult, error) {
 		h.mu.Lock()
@@ -98,7 +104,18 @@ func newEnvironment(h *workflowHarness) *testsuite.TestWorkflowEnvironment {
 			child := agent.SessionInput{TenantID: input.Step.Session.TenantID, SessionID: input.Step.Session.SessionID, AgentID: "child", TaskRef: "child-task-ref"}
 			plan.Child = &agent.ChildLaunch{Input: agent.WorkflowInput{Session: child}, WorkflowID: "child-workflow"}
 		}
+		if source.IsTool(input.Call.Name) {
+			plan.Source = &source.ToolRequest{Name: input.Call.Name, TenantID: input.Step.Session.TenantID,
+				AgentID: input.Step.Session.AgentID, OperationID: "source-operation", ToolCallID: input.Call.CallID}
+		}
 		return plan, nil
+	})
+	register(source.ReadActivity, func(ctx context.Context, request source.ToolRequest) (source.ToolResult, error) {
+		h.mu.Lock()
+		h.sourceCalls++
+		h.sourceResults = append(h.sourceResults, request.Name)
+		h.mu.Unlock()
+		return source.ToolResult{ResultRef: "source-result-ref"}, nil
 	})
 	register(agent.ExecuteActivity, func(ctx context.Context, plan agent.ToolPlan) (agent.ToolPlan, error) {
 		h.mu.Lock()
@@ -111,6 +128,8 @@ func newEnvironment(h *workflowHarness) *testsuite.TestWorkflowEnvironment {
 		h.mu.Lock()
 		h.children = append(h.children, input.ChildResult.AgentID)
 		h.childFailed = input.ChildFailed
+		h.remoteResults = append(h.remoteResults, input.RemoteResultRef)
+		h.remoteFailed = append(h.remoteFailed, input.RemoteFailed)
 		h.mu.Unlock()
 		input.Plan.ResultRef = "child-result-ref"
 		return input.Plan, nil
@@ -190,6 +209,25 @@ func TestAgentLoopAndIndependentChild(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestSourceToolDispatchesToSourceWorker(t *testing.T) {
+	h := &workflowHarness{limits: agent.DefaultLimits(), toolNames: []string{source.ToolReadFile}}
+	env := newEnvironment(h)
+	env.ExecuteWorkflow(agent.WorkflowName, workflowInput())
+	if err := env.GetWorkflowError(); err != nil {
+		t.Fatal(err)
+	}
+	if h.sourceCalls != 1 || !reflect.DeepEqual(h.sourceResults, []string{source.ToolReadFile}) {
+		t.Fatalf("source calls=%d names=%v", h.sourceCalls, h.sourceResults)
+	}
+	if !reflect.DeepEqual(h.remoteResults, []string{"source-result-ref"}) ||
+		!reflect.DeepEqual(h.remoteFailed, []bool{false}) {
+		t.Fatalf("remote results=%v failed=%v", h.remoteResults, h.remoteFailed)
+	}
+	if !reflect.DeepEqual(h.modelSteps, []string{"root:1", "root:2"}) {
+		t.Fatalf("model steps=%v", h.modelSteps)
 	}
 }
 

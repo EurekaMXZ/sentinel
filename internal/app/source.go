@@ -50,7 +50,8 @@ func openSourceRuntime(ctx context.Context, cfg config.Config) (*activity.Activi
 		return nil, nil, err
 	}
 	index := postgres.NewPayloadIndex(pool)
-	return &activity.Activities{Store: postgres.NewSourceStore(pool),
+	store := postgres.NewSourceStore(pool)
+	return &activity.Activities{Store: store, Reads: store,
 		Payloads: s3.NewPayloadStore(objectClient, cfg.S3.Bucket, index),
 		Archives: s3.NewArchiveStore(objectClient, cfg.S3.Bucket, index, cfg.Source.MaxBundleBytes),
 		Git:      sourcegit.Client{Binary: binary, CacheDir: cfg.Source.CacheDir}}, pool.Close, nil
@@ -59,6 +60,7 @@ func openSourceRuntime(ctx context.Context, cfg config.Config) (*activity.Activi
 func registerSource(registry worker.Registry, activities *activity.Activities) {
 	registry.RegisterWorkflowWithOptions(sourceworkflow.SourceSyncWorkflow, sdkworkflow.RegisterOptions{Name: source.WorkflowName})
 	registry.RegisterActivityWithOptions(activities.Run, sdkactivity.RegisterOptions{Name: source.SyncActivity})
+	registry.RegisterActivityWithOptions(activities.Read, sdkactivity.RegisterOptions{Name: source.ReadActivity})
 	registry.RegisterActivityWithOptions(activities.Finish, sdkactivity.RegisterOptions{Name: source.FinishActivity})
 }
 

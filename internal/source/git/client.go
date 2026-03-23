@@ -63,6 +63,19 @@ func (b *boundedBuffer) Write(p []byte) (int, error) {
 }
 
 func (w *workspace) run(ctx context.Context, token, input string, args ...string) (string, error) {
+	output, code, err := w.execute(ctx, token, input, args...)
+	if err != nil {
+		return "", err
+	}
+	if code != 0 {
+		return "", fmt.Errorf("git %s failed with status %d", args[0], code)
+	}
+	return output, nil
+}
+
+// execute returns the exit code instead of treating every nonzero status as an
+// error, so read operations can distinguish "no matches" from a real failure.
+func (w *workspace) execute(ctx context.Context, token, input string, args ...string) (string, int, error) {
 	options := []string{"-c", "protocol.allow=never", "-c", "protocol.https.allow=always",
 		"-c", "protocol.file.allow=always", "-c", "http.followRedirects=false", "-c", "credential.helper=",
 		"-c", "core.hooksPath=" + os.DevNull, "-c", "gc.auto=0", "-c", "maintenance.auto=false"}
@@ -86,12 +99,16 @@ func (w *workspace) run(ctx context.Context, token, input string, args ...string
 	cmd.Stdout, cmd.Stderr = &output, &diagnostic
 	if err := cmd.Run(); err != nil {
 		if ctx.Err() != nil {
-			return "", ctx.Err()
+			return "", 0, ctx.Err()
+		}
+		var exit *exec.ExitError
+		if errors.As(err, &exit) {
+			return output.String(), exit.ExitCode(), nil
 		}
 		// stderr can contain upstream-controlled text or credentials; keep it out of history.
-		return "", fmt.Errorf("git %s failed: %w", args[0], err)
+		return "", 0, fmt.Errorf("git %s failed: %w", args[0], err)
 	}
-	return output.String(), nil
+	return output.String(), 0, nil
 }
 
 func (w *workspace) Import(ctx context.Context, path string) error {

@@ -8,6 +8,7 @@ import (
 
 	"sentinel/internal/agentctx"
 	"sentinel/internal/eventlog"
+	"sentinel/internal/source"
 )
 
 const (
@@ -88,6 +89,7 @@ type Task struct {
 	ExpectedOutput    string            `json:"expected_output,omitempty"`
 	Model             string            `json:"model"`
 	Tools             []string          `json:"tools"`
+	SourceTaskQueue   string            `json:"source_task_queue,omitempty"`
 	Limits            Limits            `json:"limits"`
 	Depth             int               `json:"depth"`
 	DelegationScope   []ResourceBinding `json:"delegation_scope"`
@@ -105,12 +107,13 @@ type InitializeInput struct {
 }
 
 type Progress struct {
-	State         RuntimeState `json:"state"`
-	Limits        Limits       `json:"limits"`
-	Completed     bool         `json:"completed"`
-	ResultRef     string       `json:"result_ref,omitempty"`
-	NeedsCompact  bool         `json:"needs_compact,omitempty"`
-	ContextTokens int64        `json:"context_tokens,omitempty"`
+	State           RuntimeState `json:"state"`
+	Limits          Limits       `json:"limits"`
+	SourceTaskQueue string       `json:"source_task_queue,omitempty"`
+	Completed       bool         `json:"completed"`
+	ResultRef       string       `json:"result_ref,omitempty"`
+	NeedsCompact    bool         `json:"needs_compact,omitempty"`
+	ContextTokens   int64        `json:"context_tokens,omitempty"`
 }
 
 type StepInput struct {
@@ -145,12 +148,18 @@ type ToolPlan struct {
 	OperationID string       `json:"operation_id"`
 	ResultRef   string       `json:"result_ref,omitempty"`
 	Child       *ChildLaunch `json:"child,omitempty"`
+	// Source is set for source read tools. The Workflow dispatches it to the
+	// Source Worker's task queue instead of executing it in the Agent Worker.
+	Source *source.ToolRequest `json:"source,omitempty"`
 }
 
 type ToolCompletion struct {
-	Plan        ToolPlan `json:"plan"`
-	ChildResult Result   `json:"child_result"`
-	ChildFailed bool     `json:"child_failed"`
+	Plan            ToolPlan `json:"plan"`
+	ChildResult     Result   `json:"child_result"`
+	ChildFailed     bool     `json:"child_failed"`
+	RemoteResultRef string   `json:"remote_result_ref,omitempty"`
+	RemoteFailed    bool     `json:"remote_failed,omitempty"`
+	RemoteCode      string   `json:"remote_code,omitempty"`
 }
 
 type FinishInput struct {
@@ -188,12 +197,27 @@ type StepRecord struct {
 	OutputTokens      int64
 }
 
+type ToolSourceRefs struct {
+	RepositoryID     string `json:"repository_id,omitempty"`
+	SourceSnapshotID string `json:"source_snapshot_id,omitempty"`
+	BaseSnapshotID   string `json:"base_snapshot_id,omitempty"`
+	TargetSnapshotID string `json:"target_snapshot_id,omitempty"`
+}
+
 type ToolRecord struct {
 	Input       ToolInput
 	ID          string
 	OperationID string
 	ResultRef   string
 	Status      string
+	Source      ToolSourceRefs
+}
+
+// ContextSourceRef records evidence retained by a published Context.
+type ContextSourceRef struct {
+	RepositoryID     string
+	SourceSnapshotID string
+	Role             string
 }
 
 type Checkpoint struct {
@@ -204,6 +228,7 @@ type Checkpoint struct {
 	ContextRef      string
 	SegmentRef      string
 	Events          []eventlog.Event
+	SourceRefs      []ContextSourceRef
 	ResultRef       string
 }
 
@@ -236,6 +261,9 @@ type RuntimeStore interface {
 	ValidateSourceRefs(context.Context, string, []SourceRef) error
 	ValidateToolArtifacts(context.Context, string, []string) error
 	IsCompactedContext(context.Context, string, string, string) (bool, error)
+
+	LoadSourceSnapshot(context.Context, string, string) (string, string, error)
+	ValidateStoredObject(context.Context, string, string, string) error
 }
 
 func ModelOperation(agentID string, stepID int64) string {

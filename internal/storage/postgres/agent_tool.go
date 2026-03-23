@@ -11,12 +11,15 @@ import (
 )
 
 const selectTool = `SELECT tool_execution_id::text,operation_id,tool_name,arguments_object_id::text,
-	COALESCE(result_object_id::text,''),status FROM tool_executions
-	WHERE tenant_id=$1 AND agent_id=$2 AND step_id=$3 AND tool_call_id=$4`
+	COALESCE(result_object_id::text,''),status,COALESCE(repository_id::text,''),
+	COALESCE(source_snapshot_id::text,''),COALESCE(base_snapshot_id::text,''),COALESCE(target_snapshot_id::text,'')
+	FROM tool_executions WHERE tenant_id=$1 AND agent_id=$2 AND step_id=$3 AND tool_call_id=$4`
 
 func scanTool(row pgx.Row, input agent.ToolInput) (agent.ToolRecord, error) {
 	record := agent.ToolRecord{Input: input}
-	err := row.Scan(&record.ID, &record.OperationID, &record.Input.Call.Name, &record.Input.Call.ArgumentsRef, &record.ResultRef, &record.Status)
+	err := row.Scan(&record.ID, &record.OperationID, &record.Input.Call.Name, &record.Input.Call.ArgumentsRef,
+		&record.ResultRef, &record.Status, &record.Source.RepositoryID, &record.Source.SourceSnapshotID,
+		&record.Source.BaseSnapshotID, &record.Source.TargetSnapshotID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		err = agent.ErrNotFound
 	}
@@ -62,9 +65,11 @@ func (s *AgentStore) PrepareTool(ctx context.Context, record agent.ToolRecord) (
 		return record, err
 	}
 	_, err = tx.Exec(ctx, `INSERT INTO tool_executions (tool_execution_id,tenant_id,agent_id,step_id,
-		tool_call_id,tool_name,operation_id,arguments_object_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`, record.ID,
+		tool_call_id,tool_name,operation_id,arguments_object_id,repository_id,source_snapshot_id,base_snapshot_id,target_snapshot_id)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,NULLIF($9,'')::uuid,NULLIF($10,'')::uuid,NULLIF($11,'')::uuid,NULLIF($12,'')::uuid)`, record.ID,
 		input.Step.Session.TenantID, input.Step.Session.AgentID, input.Step.StepID,
-		input.Call.CallID, input.Call.Name, record.OperationID, input.Call.ArgumentsRef)
+		input.Call.CallID, input.Call.Name, record.OperationID, input.Call.ArgumentsRef,
+		record.Source.RepositoryID, record.Source.SourceSnapshotID, record.Source.BaseSnapshotID, record.Source.TargetSnapshotID)
 	if err != nil {
 		return record, err
 	}

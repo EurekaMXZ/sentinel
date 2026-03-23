@@ -11,6 +11,11 @@ var (
 	ErrNotFound           = errors.New("source snapshot not found")
 	ErrNotReady           = errors.New("source snapshot is not ready")
 	ErrRepositoryMismatch = errors.New("source snapshots belong to different repositories")
+	ErrPathNotFound       = errors.New("source path not found")
+	ErrNotFile            = errors.New("source path is not a file")
+	ErrBinaryFile         = errors.New("source file is binary")
+	ErrLineRange          = errors.New("invalid source line range")
+	ErrFileTooLarge       = errors.New("source file exceeds the read limit")
 )
 
 type SnapshotStatus string
@@ -39,8 +44,9 @@ type Page struct {
 }
 
 type VersionPage struct {
-	Versions   []Snapshot `json:"versions"`
-	NextCursor string     `json:"next_cursor,omitempty"`
+	RepositoryID string     `json:"repository_id"`
+	Versions     []Snapshot `json:"versions"`
+	NextCursor   string     `json:"next_cursor,omitempty"`
 }
 
 type SnapshotStore interface {
@@ -48,4 +54,12 @@ type SnapshotStore interface {
 	ListReady(ctx context.Context, repositoryID string, page Page) (VersionPage, error)
 	// PublishReady requires a verified durable archive and a transactional index update.
 	PublishReady(ctx context.Context, operationID string, snapshot Snapshot) error
+}
+
+// ReadStore is used by the Source Worker to resolve tenant-scoped versions for
+// read-only tools. It never exposes objects from another tenant or repository.
+type ReadStore interface {
+	LoadRepository(ctx context.Context, tenantID, repositoryID string) (Repository, error)
+	LoadSnapshot(ctx context.Context, tenantID, repositoryID, snapshotID string) (Snapshot, error)
+	ListReadySnapshots(ctx context.Context, tenantID, repositoryID string, offset, limit int) ([]Snapshot, bool, error)
 }

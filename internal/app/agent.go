@@ -23,6 +23,7 @@ import (
 	modelapi "sentinel/internal/llm/openai"
 	"sentinel/internal/platform/config"
 	"sentinel/internal/platform/temporal"
+	"sentinel/internal/source"
 	"sentinel/internal/storage/postgres"
 	"sentinel/internal/storage/s3"
 )
@@ -54,7 +55,11 @@ func openAgentRuntime(ctx context.Context, cfg config.Config) (*activity.Activit
 	if err != nil {
 		return nil, nil, err
 	}
-	return &activity.Activities{Store: postgres.NewAgentStore(pool), Model: model,
+	tools := make(map[string]activity.Tool)
+	for _, definition := range activity.SourceToolDefinitions() {
+		tools[definition.Name] = activity.Tool{Definition: definition, Source: true}
+	}
+	return &activity.Activities{Store: postgres.NewAgentStore(pool), Model: model, Tools: tools,
 		Payloads:                s3.NewPayloadStore(objectClient, cfg.S3.Bucket, postgres.NewPayloadIndex(pool)),
 		CompactStructuredOutput: cfg.OpenAI.CompactStructuredOutput}, pool.Close, nil
 }
@@ -115,8 +120,9 @@ func StartAgent(ctx context.Context, cfg config.Config, logger *slog.Logger, opt
 		options.Limits.ContextSafetyTokens = cfg.OpenAI.ContextSafetyTokens
 		record, err = activities.CreateRoot(ctx, options.TenantID, agent.Task{
 			Prompt: options.Prompt, InitialContextRef: options.ContextRef, Model: cfg.OpenAI.Model,
-			Instructions: "You are Sentinel, a task-oriented Agent. Use only available tools. Resource bindings identify inputs, not their contents. Delegate bounded tasks only when useful. Report what you could verify and what remains unknown.",
-			Tools:        []string{agent.ChildToolName}, Limits: options.Limits}, options.Resources)
+			Instructions:    "You are Sentinel, a task-oriented Agent. Use only available tools. Resource bindings identify inputs, not their contents. Delegate bounded tasks only when useful. Report what you could verify and what remains unknown.",
+			Tools:           append([]string{agent.ChildToolName}, source.ToolNames()...),
+			SourceTaskQueue: cfg.Temporal.SourceTaskQueue, Limits: options.Limits}, options.Resources)
 	}
 	if err != nil {
 		return err

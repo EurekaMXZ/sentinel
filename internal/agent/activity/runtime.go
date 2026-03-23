@@ -27,6 +27,8 @@ type Model interface {
 type Tool struct {
 	Definition responses.FunctionToolParam
 	Execute    func(context.Context, ToolRequest) (json.RawMessage, error)
+	// Source tools are validated here but executed by the Source Worker.
+	Source bool
 }
 
 type ToolRequest struct {
@@ -158,6 +160,7 @@ func (a *Activities) validateTask(task agent.Task) error {
 		return permanent("invalid_agent_limits")
 	}
 	seen := make(map[string]bool)
+	hasSourceTool := false
 	for _, name := range task.Tools {
 		if seen[name] {
 			return permanent("duplicate_tool")
@@ -165,10 +168,16 @@ func (a *Activities) validateTask(task agent.Task) error {
 		seen[name] = true
 		if name != agent.ChildToolName {
 			tool, ok := a.Tools[name]
-			if !ok || tool.Execute == nil || tool.Definition.Name != name {
+			if !ok || tool.Definition.Name != name || (!tool.Source && tool.Execute == nil) {
 				return permanent("unregistered_tool")
 			}
+			if tool.Source {
+				hasSourceTool = true
+			}
 		}
+	}
+	if hasSourceTool && strings.TrimSpace(task.SourceTaskQueue) == "" {
+		return permanent("source_task_queue_missing")
 	}
 	for _, binding := range task.DelegationScope {
 		if err := binding.Validate(); err != nil {
@@ -182,7 +191,8 @@ func progress(record agent.AgentRecord, task agent.Task) agent.Progress {
 	return agent.Progress{State: agent.RuntimeState{TenantID: record.Input.TenantID, SessionID: record.Input.SessionID,
 		AgentID: record.Input.AgentID, RowVersion: record.Head.RowVersion,
 		ContextVersion: record.Head.ContextVersion, LastEventSequence: record.Head.LastEventSequence,
-		NextStepID: record.Head.NextStepID}, Limits: task.Limits, Completed: record.Status == "completed", ResultRef: record.ResultRef}
+		NextStepID: record.Head.NextStepID}, Limits: task.Limits, SourceTaskQueue: task.SourceTaskQueue,
+		Completed: record.Status == "completed", ResultRef: record.ResultRef}
 }
 
 func (a *Activities) Finish(ctx context.Context, input agent.FinishInput) error {

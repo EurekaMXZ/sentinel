@@ -49,6 +49,12 @@ type Workspace interface {
 	State(context.Context) (GitState, error)
 	Bundle(context.Context, string, []string) (BundleInfo, error)
 	Verify(context.Context) error
+	// Read-only operations resolve immutable commits; offsets paginate results.
+	HasCommit(context.Context, string) (bool, error)
+	ListFiles(context.Context, string, string, int, int) ([]FileEntry, bool, error)
+	ReadFile(context.Context, string, string, int, int, int, int) (string, int, int, bool, error)
+	Search(context.Context, string, string, string, int, int, int) ([]SearchMatch, bool, bool, error)
+	Diff(context.Context, string, string, string, int, int, int) (string, int, bool, bool, error)
 	Close() error
 }
 

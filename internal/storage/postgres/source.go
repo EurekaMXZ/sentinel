@@ -17,6 +17,8 @@ type SourceStore struct{ pool *pgxpool.Pool }
 
 func NewSourceStore(pool *pgxpool.Pool) *SourceStore { return &SourceStore{pool: pool} }
 
+var _ source.ReadStore = (*SourceStore)(nil)
+
 const repositoryColumns = `repository_id::text, tenant_id::text, remote_url, COALESCE(credential_ref,''),
 	tracked_refs, object_format, COALESCE(archive_head_id::text,''), archive_version, status`
 
@@ -136,6 +138,51 @@ func (s *SourceStore) LoadManifest(ctx context.Context, tenant, repository, id s
 		&checksum, &m.PrerequisiteCommitSHAs, &m.OperationID, &m.CreatedAt, &record.ObjectRef)
 	m.BundleChecksum = hex.EncodeToString(checksum)
 	return record, sourceError(err)
+}
+
+const snapshotColumns = `snapshot_id::text,repository_id::text,commit_sha,tree_sha,
+	COALESCE(storage_manifest_id::text,''),status,created_at`
+
+func scanSnapshot(row pgx.Row) (source.Snapshot, error) {
+	var snapshot source.Snapshot
+	err := row.Scan(&snapshot.ID, &snapshot.RepositoryID, &snapshot.CommitSHA, &snapshot.TreeSHA,
+		&snapshot.StorageManifestID, &snapshot.Status, &snapshot.CreatedAt)
+	return snapshot, sourceError(err)
+}
+
+func (s *SourceStore) LoadSnapshot(ctx context.Context, tenant, repository, snapshotID string) (source.Snapshot, error) {
+	return scanSnapshot(s.pool.QueryRow(ctx, `SELECT `+snapshotColumns+` FROM source_snapshots
+		WHERE tenant_id=$1 AND repository_id=$2 AND snapshot_id=$3`, tenant, repository, snapshotID))
+}
+
+func (s *SourceStore) ListReadySnapshots(ctx context.Context, tenant, repository string, offset, limit int) ([]source.Snapshot, bool, error) {
+	if offset < 0 || limit <= 0 {
+		return nil, false, errors.New("invalid snapshot page")
+	}
+	rows, err := s.pool.Query(ctx, `SELECT `+snapshotColumns+` FROM source_snapshots
+		WHERE tenant_id=$1 AND repository_id=$2 AND status='ready'
+		ORDER BY ready_at DESC,snapshot_id DESC LIMIT $3 OFFSET $4`, tenant, repository, limit+1, offset)
+	if err != nil {
+		return nil, false, err
+	}
+	defer rows.Close()
+	snapshots := make([]source.Snapshot, 0, limit)
+	for rows.Next() {
+		var snapshot source.Snapshot
+		if err := rows.Scan(&snapshot.ID, &snapshot.RepositoryID, &snapshot.CommitSHA, &snapshot.TreeSHA,
+			&snapshot.StorageManifestID, &snapshot.Status, &snapshot.CreatedAt); err != nil {
+			return nil, false, err
+		}
+		snapshots = append(snapshots, snapshot)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, false, err
+	}
+	more := len(snapshots) > limit
+	if more {
+		snapshots = snapshots[:limit]
+	}
+	return snapshots, more, nil
 }
 
 func (s *SourceStore) KnownCommits(ctx context.Context, tenant, repository string) (map[string]source.Snapshot, error) {

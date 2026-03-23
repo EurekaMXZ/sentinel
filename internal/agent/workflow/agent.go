@@ -8,6 +8,7 @@ import (
 	"go.temporal.io/sdk/workflow"
 
 	"sentinel/internal/agent"
+	"sentinel/internal/source"
 )
 
 // AgentSessionWorkflow is shared by root and child Agents. All non-deterministic
@@ -49,6 +50,15 @@ func AgentSessionWorkflow(ctx workflow.Context, input agent.WorkflowInput) (resu
 		HeartbeatTimeout: 30 * time.Second,
 		RetryPolicy:      &temporal.RetryPolicy{InitialInterval: 2 * time.Second, BackoffCoefficient: 2, MaximumInterval: 30 * time.Second},
 	})
+	sourceCtx := workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
+		StartToCloseTimeout: 10 * time.Minute, ScheduleToCloseTimeout: 30 * time.Minute,
+		HeartbeatTimeout: 45 * time.Second, WaitForCancellation: true,
+		RetryPolicy: &temporal.RetryPolicy{InitialInterval: 2 * time.Second, BackoffCoefficient: 2,
+			MaximumInterval: 30 * time.Second, MaximumAttempts: 5},
+	})
+	if progress.SourceTaskQueue != "" {
+		sourceCtx = workflow.WithTaskQueue(sourceCtx, progress.SourceTaskQueue)
+	}
 	stepsThisRun := 0
 	for !progress.Completed {
 		if progress.State.NextStepID < 1 || progress.State.NextStepID > progress.Limits.MaxSteps {
@@ -77,6 +87,21 @@ func AgentSessionWorkflow(ctx workflow.Context, input agent.WorkflowInput) (resu
 				return result, err
 			}
 			if plan.ResultRef != "" {
+				continue
+			}
+			if plan.Source != nil {
+				if progress.SourceTaskQueue == "" {
+					return result, temporal.NewNonRetryableApplicationError("source_task_queue_missing", "source_task_queue_missing", nil)
+				}
+				var sourceResult source.ToolResult
+				if err := workflow.ExecuteActivity(sourceCtx, source.ReadActivity, *plan.Source).Get(ctx, &sourceResult); err != nil {
+					return result, err
+				}
+				if err := workflow.ExecuteActivity(ioCtx, agent.CompleteActivity, agent.ToolCompletion{
+					Plan: plan, RemoteResultRef: sourceResult.ResultRef, RemoteFailed: sourceResult.Failed,
+					RemoteCode: sourceResult.Code}).Get(ctx, &plan); err != nil {
+					return result, err
+				}
 				continue
 			}
 			if plan.Child != nil {

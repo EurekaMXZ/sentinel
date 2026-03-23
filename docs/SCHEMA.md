@@ -121,6 +121,8 @@ Context 可以不引用源码，也可以保留多个仓库和版本。`default`
 一旦记录源码快照或 diff 两端版本，就必须提供仓库，复合外键校验实际版本所属仓库。
 同一 Agent 的不同操作可以访问不同仓库；单次 `source_diff` 的两个版本必须同时出现且属于同一仓库。
 工具派发前保存解析后的快照参数，重试复用该参数；资源选择和证据都不会被上游分支移动隐式替换。
+源码工具在 `tool_executions` 写入已解析的仓库和快照（diff 同时写 base / target），
+Checkpoint 再把实际使用的版本写入 `event_index`，并把 Context 保留的证据写入 `context_source_refs`。
 
 事件正文先写入不可变 NDJSON 对象段。索引的 `record_ordinal` 是解压后段内从 0 开始的记录号，
 不是压缩文件的字节偏移。事件索引、Context 记录、head CAS、执行 / 幂等完成及 outbox

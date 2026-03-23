@@ -62,7 +62,7 @@ CLI 先输出 `tenant_id`、`session_id`、`agent_id`、`workflow_id`；加 `-wa
 ```
 
 也支持 `source_repository` 与 `source_snapshot` 资源，创建时检查租户及资源状态。
-关联资源只向模型提供标识；当前尚无资源读取工具，因此不会自动把其正文加入模型请求。
+关联资源只向模型提供标识；需要时由模型显式调用源码工具读取，不会自动把正文加入模型请求。
 需要直接注入已有文本时，`-context UUID` 引用对象存储中的 `{"text":"..."}` 初始 Context 文档。
 该对象须已登记为同租户的 verified 对象；当前未提供上传文档的业务 API。
 
@@ -71,13 +71,41 @@ CLI 先输出 `tenant_id`、`session_id`、`agent_id`、`workflow_id`；加 `-wa
 每步依次执行模型请求、工具派发和检查点提交。模型返回文本时保存结构化结果并完成；返回 function call 时保存各个工具结果，
 将完整模型输出及对应 `function_call_output` 加入 Context，再请求模型。一个响应中的多个工具按返回顺序处理。
 
-当前注册的模型工具为 `call_child_agent`，参数包括 `task`、可选的 `context_ref`、`resources` 和 `expected_output`。
-服务端检查工具白名单、深度及资源范围，保存独立子任务和资源关联，再由 Workflow 启动 Child Workflow。
+当前注册的模型工具分为两类：
+
+- `call_child_agent`：参数包括 `task`、可选的 `context_ref`、`resources` 和 `expected_output`。
+  服务端检查工具白名单、深度及资源范围，保存独立子任务和资源关联，再由 Workflow 启动 Child Workflow。
+- `source_list_versions`、`source_list_files`、`source_read_file`、`source_search`、`source_diff`：
+  Agent Worker 校验参数和资源范围后，Workflow 通过 `sentinel.source.read` Activity 将请求派发到
+  `TEMPORAL_SOURCE_TASK_QUEUE`，由 Source Worker 在恢复的 bare 仓库上执行只读查询。
+
 子 Agent 不隐式继承父任务、完整消息历史或资源集合。父 Agent 通过工具结果接收子 Agent 的结构化结果及结果引用。
 子任务失败会形成工具错误结果，父 Agent 可以据此继续；父 Workflow 取消时会向子 Workflow 传播取消。
 
-工具扩展位于 `internal/agent/activity.Tool`。新增工具必须注册 SDK 工具定义及处理函数，并由服务端加入任务白名单。
-处理函数应只读，或根据传入的稳定 `OperationID` 实现幂等。当前未注册命令执行、源码修改或尚未实现的源码查询工具。
+工具扩展位于 `internal/agent/activity.Tool`。`Source` 为 true 的工具只在 Agent Worker 做参数、权限和
+快照状态校验，实际执行由 Source Worker 的 Activity 承担。本地处理函数应只读，或根据传入的稳定
+`OperationID` 实现幂等。当前未注册命令执行或源码修改工具。
+
+## 源码读取工具
+
+| 工具 | 主要参数 | 结果 |
+| --- | --- | --- |
+| `source_list_versions` | `repository_id`、`cursor`、`limit` | 仓库内已就绪快照及 `next_cursor` |
+| `source_list_files` | `source_snapshot_id`、`path`、`cursor`、`limit` | 单层目录项或文件项 |
+| `source_read_file` | `source_snapshot_id`、`path`、`start_line`、`end_line` | 行范围内容、实际行号和 `truncated` |
+| `source_search` | `source_snapshot_id`、`query`、`path`、`cursor`、`limit` | 字面量匹配行及位置 |
+| `source_diff` | `base_snapshot_id`、`target_snapshot_id`、`path`、`cursor`、`limit` | 同一仓库两个快照的 unified patch |
+
+- Agent Worker 用 `LoadSourceSnapshot` 解析快照所属仓库和 ready 状态，并用 Agent 的
+  `agent_resource_bindings` 校验访问范围；Source Worker 会再次校验租户、仓库和快照状态。
+- `source_list_versions` 需要仓库绑定或同仓库快照绑定；其余工具需要快照绑定，或所在仓库的仓库绑定。
+- 游标是不透明字符串，绑定工具、租户、快照/查询、路径和分页大小；跨查询复用会被拒绝。
+- 单页结果受条数、行数和字节数限制；`next_cursor` 表示还有下一页。完整结果作为
+  `source-tool-result` 对象存入 S3；进入 Context 的工具结果包含受限数据和指向该对象的
+  `result_ref`。
+- `tool_executions` 记录仓库、快照或 diff 两端版本；`event_index` 和 `context_source_refs`
+  保存实际使用的证据。重试复用已保存的 tool result，不重新选择版本。
+- Source Worker 每次查询从当前归档 head 恢复 bare 仓库；缓存恢复失败会重试，查询本身不产生新版本。
 
 ## SDK 与持久化
 
@@ -155,8 +183,9 @@ Workflow 在下一次模型调用前执行 `sentinel.agent.compact`：
 深度为 0 时不向模型提供子 Agent 工具。`OPENAI_REQUEST_TIMEOUT` 最大为 30 分钟。
 
 当前每步保存完整 Context Snapshot，尚未实现 delta；token 估算为保守近似，不使用模型专用 tokenizer。
-源码读取工具、outbox 消费及业务 HTTP API 仍待实现。
-结构化结果中的源码证据及产物数组目前为空，不会生成未经工具验证的源码位置。
+outbox 消费及业务 HTTP API 仍待实现。
+源码工具只在实际调用后生成证据；无源码工具调用的任务保持空的 `source_refs`。
+Source Worker 当前每次查询都会从归档恢复临时 bare 仓库，尚未共享持久读缓存。
 
 ```powershell
 go test ./...
