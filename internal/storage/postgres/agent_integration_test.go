@@ -252,6 +252,15 @@ func TestRuntimeSDKToolChildAndCheckpointRecovery(t *testing.T) {
 	if _, err := f.payloads.Get(t.Context(), newRuntimeID(), final.ResultRef); !errors.Is(err, payload.ErrNotFound) {
 		t.Fatalf("cross-tenant payload access: %v", err)
 	}
+	agents, err := f.store.ListAgents(t.Context(), f.tenant, 10)
+	if err != nil || len(agents) != 2 {
+		t.Fatalf("list Agents: %+v err=%v", agents, err)
+	}
+	for _, listed := range agents {
+		if listed.CreatedAt.IsZero() || listed.Head.TenantID != f.tenant || listed.Head.AgentID != listed.Input.AgentID {
+			t.Fatalf("incomplete Agent listing: %+v", listed)
+		}
+	}
 }
 
 func TestRuntimeUpstreamFailureRecovery(t *testing.T) {

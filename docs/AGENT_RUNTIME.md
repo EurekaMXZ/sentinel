@@ -183,7 +183,7 @@ Workflow 在下一次模型调用前执行 `sentinel.agent.compact`：
 深度为 0 时不向模型提供子 Agent 工具。`OPENAI_REQUEST_TIMEOUT` 最大为 30 分钟。
 
 当前每步保存完整 Context Snapshot，尚未实现 delta；token 估算为保守近似，不使用模型专用 tokenizer。
-outbox 消费及业务 HTTP API 仍待实现。
+控制 API 已提供 Agent 创建、状态、结果、cancel 和 resume；outbox 消费仍待实现。
 源码工具只在实际调用后生成证据；无源码工具调用的任务保持空的 `source_refs`。
 Source Worker 当前每次查询都会从归档恢复临时 bare 仓库，尚未共享持久读缓存。
 

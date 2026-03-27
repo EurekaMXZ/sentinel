@@ -56,14 +56,6 @@ type InitialContext struct {
 	Text string `json:"text"`
 }
 
-type StructuredResult struct {
-	AgentID     string            `json:"agent_id"`
-	Summary     string            `json:"summary"`
-	ResponseRef string            `json:"response_ref"`
-	Artifacts   []string          `json:"artifacts"`
-	SourceRefs  []json.RawMessage `json:"source_refs"`
-}
-
 func (a *Activities) Initialize(ctx context.Context, input agent.InitializeInput) (agent.Progress, error) {
 	if err := validateSession(input.Session); err != nil {
 		return agent.Progress{}, err

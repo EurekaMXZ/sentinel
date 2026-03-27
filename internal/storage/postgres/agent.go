@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"sentinel/internal/agent"
@@ -49,29 +50,69 @@ func (s *AgentStore) ValidateStoredObject(ctx context.Context, tenantID, ref, ki
 	return nil
 }
 
-func (s *AgentStore) LoadAgent(ctx context.Context, tenantID, agentID string) (agent.AgentRecord, error) {
+const selectAgent = `SELECT a.tenant_id::text, a.session_id::text, a.agent_id::text,
+	a.task_object_id::text, a.workflow_id, COALESCE(a.parent_agent_id::text,''),
+	COALESCE(a.parent_tool_execution_id::text,''), a.status, COALESCE(a.result_object_id::text,''),
+	COALESCE(a.error_object_id::text,''), a.created_at, a.started_at, a.finished_at,
+	h.row_version, h.context_version, h.last_event_sequence, h.context_event_sequence,
+	COALESCE(h.snapshot_record_id::text,''), COALESCE(c.object_id::text,''), h.next_step_id
+	FROM agents a JOIN agent_head h ON h.agent_id=a.agent_id AND h.tenant_id=a.tenant_id
+	LEFT JOIN context_records c ON c.context_record_id=h.snapshot_record_id AND c.tenant_id=h.tenant_id`
+
+func scanAgent(row pgx.Row) (agent.AgentRecord, error) {
 	var record agent.AgentRecord
-	err := s.pool.QueryRow(ctx, `SELECT a.tenant_id::text, a.session_id::text, a.agent_id::text,
-		a.task_object_id::text, a.workflow_id, COALESCE(a.parent_agent_id::text,''),
-		COALESCE(a.parent_tool_execution_id::text,''), a.status, COALESCE(a.result_object_id::text,''),
-		h.row_version, h.context_version, h.last_event_sequence, h.context_event_sequence,
-		COALESCE(h.snapshot_record_id::text,''), COALESCE(c.object_id::text,''), h.next_step_id
-		FROM agents a JOIN agent_head h ON h.agent_id=a.agent_id AND h.tenant_id=a.tenant_id
-		LEFT JOIN context_records c ON c.context_record_id=h.snapshot_record_id AND c.tenant_id=h.tenant_id
-		WHERE a.tenant_id=$1 AND a.agent_id=$2`, tenantID, agentID).
-		Scan(&record.Input.TenantID, &record.Input.SessionID, &record.Input.AgentID, &record.Input.TaskRef,
-			&record.WorkflowID, &record.ParentAgentID, &record.ParentToolExecutionID, &record.Status, &record.ResultRef,
-			&record.Head.RowVersion, &record.Head.ContextVersion, &record.Head.LastEventSequence,
-			&record.Head.ContextEventSequence, &record.Head.SnapshotRecordID, &record.Head.SnapshotRef, &record.Head.NextStepID)
+	var startedAt, finishedAt pgtype.Timestamptz
+	err := row.Scan(&record.Input.TenantID, &record.Input.SessionID, &record.Input.AgentID, &record.Input.TaskRef,
+		&record.WorkflowID, &record.ParentAgentID, &record.ParentToolExecutionID, &record.Status,
+		&record.ResultRef, &record.ErrorRef, &record.CreatedAt, &startedAt, &finishedAt,
+		&record.Head.RowVersion, &record.Head.ContextVersion, &record.Head.LastEventSequence,
+		&record.Head.ContextEventSequence, &record.Head.SnapshotRecordID, &record.Head.SnapshotRef, &record.Head.NextStepID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return record, agent.ErrNotFound
 	}
 	if err != nil {
 		return record, err
 	}
-	record.Head.TenantID, record.Head.AgentID = tenantID, agentID
+	if startedAt.Valid {
+		value := startedAt.Time
+		record.StartedAt = &value
+	}
+	if finishedAt.Valid {
+		value := finishedAt.Time
+		record.FinishedAt = &value
+	}
+	record.Head.TenantID, record.Head.AgentID = record.Input.TenantID, record.Input.AgentID
+	return record, nil
+}
+
+func (s *AgentStore) LoadAgent(ctx context.Context, tenantID, agentID string) (agent.AgentRecord, error) {
+	record, err := scanAgent(s.pool.QueryRow(ctx, selectAgent+` WHERE a.tenant_id=$1 AND a.agent_id=$2`, tenantID, agentID))
+	if err != nil {
+		return record, err
+	}
 	record.Resources, err = s.ListAgentBindings(ctx, tenantID, agentID)
 	return record, err
+}
+
+func (s *AgentStore) ListAgents(ctx context.Context, tenantID string, limit int) ([]agent.AgentRecord, error) {
+	if limit <= 0 || limit > 200 {
+		return nil, errors.New("invalid agent page limit")
+	}
+	rows, err := s.pool.Query(ctx, selectAgent+` WHERE a.tenant_id=$1 ORDER BY a.created_at DESC,a.agent_id DESC LIMIT $2`,
+		tenantID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	agents := make([]agent.AgentRecord, 0, limit)
+	for rows.Next() {
+		record, err := scanAgent(rows)
+		if err != nil {
+			return nil, err
+		}
+		agents = append(agents, record)
+	}
+	return agents, rows.Err()
 }
 
 func (s *AgentStore) CreateAgent(ctx context.Context, record agent.AgentRecord) (agent.AgentRecord, error) {

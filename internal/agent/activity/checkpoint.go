@@ -120,7 +120,7 @@ func (a *Activities) Checkpoint(ctx context.Context, input agent.StepInput) (age
 	}
 	checkpoint.SourceRefs = sourceRefs
 	if len(calls) == 0 {
-		resultRefs := make([]json.RawMessage, 0)
+		resultRefs := make([]agent.SourceRef, 0)
 		seenResultRefs := make(map[agent.SourceRef]bool)
 		for _, ref := range sourceRefs {
 			sourceRef := agent.SourceRef{RepositoryID: ref.RepositoryID, SourceSnapshotID: ref.SourceSnapshotID}
@@ -128,13 +128,9 @@ func (a *Activities) Checkpoint(ctx context.Context, input agent.StepInput) (age
 				continue
 			}
 			seenResultRefs[sourceRef] = true
-			data, err := json.Marshal(sourceRef)
-			if err != nil {
-				return agent.Progress{}, permanent("invalid_source_ref")
-			}
-			resultRefs = append(resultRefs, data)
+			resultRefs = append(resultRefs, sourceRef)
 		}
-		checkpoint.ResultRef, err = a.putJSON(ctx, input.Session.TenantID, "agent-result", StructuredResult{
+		checkpoint.ResultRef, err = a.putJSON(ctx, input.Session.TenantID, "agent-result", agent.StructuredResult{
 			AgentID: input.Session.AgentID, Summary: responseSummary(response), ResponseRef: step.ResponseRef,
 			Artifacts: []string{}, SourceRefs: resultRefs})
 		if err != nil {

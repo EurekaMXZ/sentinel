@@ -4,16 +4,52 @@ package api
 import (
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 )
 
-func NewRouter(logger *slog.Logger) *gin.Engine {
+const tenantContextKey = "sentinel_tenant_id"
+
+func NewRouter(logger *slog.Logger, deps Dependencies) *gin.Engine {
 	router := gin.New()
 	router.HandleMethodNotAllowed = true
 	router.Use(gin.Recovery())
-	router.Use(func(c *gin.Context) {
+	router.Use(requestLogger(logger))
+	router.GET("/healthz", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"status": "ok", "service": "sentinel-api"})
+	})
+	if deps.enabled() {
+		v1 := router.Group("/v1")
+		v1.Use(tenantMiddleware(), bodyLimit(1<<20))
+		v1.POST("/agents", createAgent(deps, logger))
+		v1.GET("/agents", listAgents(deps, logger))
+		v1.GET("/agents/:agent_id", getAgent(deps, logger))
+		v1.GET("/agents/:agent_id/result", getAgentResult(deps, logger))
+		v1.POST("/agents/:agent_id/cancel", cancelAgent(deps, logger))
+		v1.POST("/agents/:agent_id/resume", resumeAgent(deps, logger))
+
+		v1.POST("/source/repositories", createRepository(deps, logger))
+		v1.GET("/source/repositories", listRepositories(deps, logger))
+		v1.GET("/source/repositories/:repository_id", getRepository(deps, logger))
+		v1.GET("/source/repositories/:repository_id/versions", listVersions(deps, logger))
+		v1.POST("/source/repositories/:repository_id/syncs", createSync(deps, logger))
+		v1.GET("/source/syncs/:sync_id", getSync(deps, logger))
+		v1.POST("/source/syncs/:sync_id/resume", resumeSync(deps, logger))
+	}
+	router.NoRoute(func(c *gin.Context) {
+		errorJSON(c, http.StatusNotFound, "route_not_found", "route not found")
+	})
+	router.NoMethod(func(c *gin.Context) {
+		errorJSON(c, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
+	})
+	return router
+}
+
+func requestLogger(logger *slog.Logger) gin.HandlerFunc {
+	return func(c *gin.Context) {
 		started := time.Now()
 		c.Next()
 		logger.InfoContext(c.Request.Context(), "HTTP request",
@@ -22,15 +58,29 @@ func NewRouter(logger *slog.Logger) *gin.Engine {
 			"status", c.Writer.Status(),
 			"duration", time.Since(started),
 		)
-	})
-	router.GET("/healthz", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"status": "ok", "service": "sentinel-api"})
-	})
-	router.NoRoute(func(c *gin.Context) {
-		c.JSON(http.StatusNotFound, gin.H{"error": "route not found"})
-	})
-	router.NoMethod(func(c *gin.Context) {
-		c.JSON(http.StatusMethodNotAllowed, gin.H{"error": "method not allowed"})
-	})
-	return router
+	}
+}
+
+func tenantMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		raw := strings.TrimSpace(c.GetHeader("X-Tenant-ID"))
+		id, err := uuid.Parse(raw)
+		if err != nil || id == uuid.Nil {
+			errorJSON(c, http.StatusBadRequest, "tenant_required", "X-Tenant-ID must be a nonzero UUID")
+			return
+		}
+		c.Set(tenantContextKey, id.String())
+		c.Next()
+	}
+}
+
+func tenantID(c *gin.Context) string {
+	return c.GetString(tenantContextKey)
+}
+
+func bodyLimit(limit int64) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, limit)
+		c.Next()
+	}
 }

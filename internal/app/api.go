@@ -7,15 +7,87 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"strings"
+	"time"
 
+	"sentinel/internal/agent"
+	agentactivity "sentinel/internal/agent/activity"
 	"sentinel/internal/api"
 	"sentinel/internal/platform/config"
+	"sentinel/internal/platform/temporal"
+	sourceactivity "sentinel/internal/source/activity"
+	"sentinel/internal/storage/postgres"
+	"sentinel/internal/storage/s3"
 )
 
+func openAPIRuntime(ctx context.Context, cfg config.Config, logger *slog.Logger) (*api.Dependencies, func(), error) {
+	if strings.TrimSpace(cfg.OpenAI.Model) == "" {
+		return nil, nil, errors.New("OPENAI_MODEL is required for the control API")
+	}
+	limits := agent.DefaultLimits()
+	limits.ModelTimeout = cfg.OpenAI.RequestTimeout
+	limits.ContextWindowTokens = cfg.OpenAI.ContextWindowTokens
+	limits.ContextSafetyTokens = cfg.OpenAI.ContextSafetyTokens
+	if err := limits.Validate(); err != nil {
+		return nil, nil, err
+	}
+	objectClient, err := s3.New(cfg.S3)
+	if err != nil {
+		return nil, nil, err
+	}
+	checkCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	exists, err := objectClient.BucketExists(checkCtx, cfg.S3.Bucket)
+	if err != nil {
+		return nil, nil, fmt.Errorf("check S3 bucket: %w", err)
+	}
+	if !exists {
+		return nil, nil, errors.New("S3 bucket is missing; run minio-init first")
+	}
+	pool, err := postgres.Open(ctx, cfg.Postgres)
+	if err != nil {
+		return nil, nil, err
+	}
+	temporalClient, err := temporal.Dial(ctx, cfg.Temporal, logger)
+	if err != nil {
+		pool.Close()
+		return nil, nil, err
+	}
+	index := postgres.NewPayloadIndex(pool)
+	payloads := s3.NewPayloadStore(objectClient, cfg.S3.Bucket, index)
+	agentStore := postgres.NewAgentStore(pool)
+	sourceStore := postgres.NewSourceStore(pool)
+	dependencies := &api.Dependencies{
+		Agents:         agentStore,
+		AgentTasks:     &agentactivity.Activities{Store: agentStore, Payloads: payloads, Tools: agentactivity.SourceToolSet()},
+		AgentResources: agentStore,
+		Sources:        sourceStore,
+		SourceTasks:    &sourceactivity.Activities{Store: sourceStore, Payloads: payloads},
+		Payloads:       payloads,
+		Workflows:      temporalClient,
+		AgentTaskQueue: cfg.Temporal.AgentTaskQueue, SourceTaskQueue: cfg.Temporal.SourceTaskQueue,
+		Model: cfg.OpenAI.Model, Limits: limits,
+	}
+	closeRuntime := func() {
+		temporalClient.Close()
+		pool.Close()
+	}
+	return dependencies, closeRuntime, nil
+}
+
 func RunAPI(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
+	dependencies, closeRuntime, err := openAPIRuntime(ctx, cfg, logger)
+	if err != nil {
+		return err
+	}
+	defer closeRuntime()
+	return serveAPI(ctx, cfg, logger, api.NewRouter(logger, *dependencies))
+}
+
+func serveAPI(ctx context.Context, cfg config.Config, logger *slog.Logger, handler http.Handler) error {
 	server := &http.Server{
 		Addr:              cfg.HTTP.Address,
-		Handler:           api.NewRouter(logger),
+		Handler:           handler,
 		ReadHeaderTimeout: cfg.HTTP.ReadHeaderTimeout,
 		ReadTimeout:       cfg.HTTP.ReadTimeout,
 		WriteTimeout:      cfg.HTTP.WriteTimeout,

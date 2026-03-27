@@ -37,3 +37,13 @@ type Result struct {
 	AgentID   string `json:"agent_id"`
 	ResultRef string `json:"result_ref"`
 }
+
+// StructuredResult is the durable final answer of an Agent. It is stored in
+// object storage and referenced by agents.result_object_id.
+type StructuredResult struct {
+	AgentID     string      `json:"agent_id"`
+	Summary     string      `json:"summary"`
+	ResponseRef string      `json:"response_ref"`
+	Artifacts   []string    `json:"artifacts"`
+	SourceRefs  []SourceRef `json:"source_refs"`
+}

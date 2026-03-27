@@ -19,6 +19,15 @@ func integerProperty(description string, minimum, maximum int) map[string]any {
 	return property
 }
 
+// SourceToolSet returns the server-side registry entries for source tools.
+func SourceToolSet() map[string]Tool {
+	tools := make(map[string]Tool, len(source.ToolNames()))
+	for _, definition := range SourceToolDefinitions() {
+		tools[definition.Name] = Tool{Definition: definition, Source: true}
+	}
+	return tools
+}
+
 // SourceToolDefinitions are model-visible tool definitions. Execution is
 // dispatched to the Source Worker; the Agent Worker only validates arguments
 // and access.

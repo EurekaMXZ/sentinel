@@ -104,6 +104,7 @@ type SyncJob struct {
 	Status                 string
 	ExpectedArchiveVersion int64
 	ResultRef              string
+	ErrorRef               string
 	Owner                  string
 	Fence                  int64
 	RequestHash            []byte

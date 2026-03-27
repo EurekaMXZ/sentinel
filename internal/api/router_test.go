@@ -11,7 +11,7 @@ import (
 )
 
 func TestRouterHTTPContract(t *testing.T) {
-	router := NewRouter(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	router := NewRouter(slog.New(slog.NewTextHandler(io.Discard, nil)), Dependencies{})
 	for _, test := range []struct {
 		name   string
 		method string

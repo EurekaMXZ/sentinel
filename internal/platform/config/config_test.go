@@ -13,7 +13,7 @@ func lookup(values map[string]string) func(string) (string, bool) {
 	}
 }
 
-func TestLoadDefaultsAllowAPIWithoutExternalServices(t *testing.T) {
+func TestLoadDefaults(t *testing.T) {
 	cfg, err := load(lookup(nil))
 	if err != nil {
 		t.Fatal(err)

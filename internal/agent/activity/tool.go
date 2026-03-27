@@ -340,7 +340,7 @@ func (a *Activities) CompleteTool(ctx context.Context, input agent.ToolCompletio
 	if child.Status != "completed" || child.Input.AgentID != input.ChildResult.AgentID || child.ResultRef == "" || child.ResultRef != input.ChildResult.ResultRef {
 		return input.Plan, permanent("child_result_mismatch")
 	}
-	var result StructuredResult
+	var result agent.StructuredResult
 	if err := a.getJSON(ctx, child.Input.TenantID, child.ResultRef, &result); err != nil {
 		return input.Plan, err
 	}

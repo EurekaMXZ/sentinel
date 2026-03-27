@@ -129,7 +129,8 @@ $env:OPENAI_CONTEXT_SAFETY_TOKENS = "8192"
 
 `OPENAI_CONTEXT_WINDOW_TOKENS` 和 `OPENAI_CONTEXT_SAFETY_TOKENS` 定义自动 Context compact 的预算；
 `OPENAI_COMPACT_STRUCTURED_OUTPUT=false` 可关闭 Compact 请求的 JSON Schema 输出。
-未配置或无法访问模型时 API、Source Worker 和 Relay Worker 仍可独立启动。
+控制 API 需要 `OPENAI_MODEL` 来保存新任务，但自身不调用模型，因此不需要 `OPENAI_API_KEY`。
+Source Worker 和 Relay Worker 不需要模型配置。
 
 `S3_ENDPOINT` 不带 `http://` 前缀。更改 `.env` 的数据库或 MinIO 凭据时，也应同步修改终端环境变量；
 数据库用户名、密码或库名包含 URI 特殊字符时，DSN 中需要 URL 编码。
@@ -147,10 +148,12 @@ go run ./cmd/relay-worker
 注册源码同步、失败清理和只读源码查询 Activity；它需要安装 Git，并可通过 `GIT_BINARY` 指定可执行文件。
 Agent 与 Source Worker 必须使用相同的 `TEMPORAL_SOURCE_TASK_QUEUE`，源码工具请求会派发到该队列。
 Relay Worker 仍只验证 Temporal 连接并等待退出。
-API 的 `/healthz` 仅表示 HTTP 进程存活；业务 HTTP API 尚未加入。
+API 的 `/healthz` 仅表示 HTTP 进程存活。`/v1` 控制 API 已提供 Agent 与源码同步的管理入口，
+使用 `X-Tenant-ID` 头显式传入租户；当前不包含认证。请求格式见 [控制 API](API.md)。
 
 模型接口使用外部服务。启动 Agent Worker 和 Agent CLI 的终端还须设置 `OPENAI_API_KEY`、`OPENAI_MODEL`；
-需要自定义 Responses API 地址时设置 `OPENAI_BASE_URL`，无需为它增加 Compose 服务。
+控制 API 需要 `OPENAI_MODEL` 但不需要 `OPENAI_API_KEY`。需要自定义 Responses API 地址时设置
+`OPENAI_BASE_URL`，无需为它增加 Compose 服务。
 创建任务、等待结果及恢复已有 Agent 的命令见 [AGENT_RUNTIME.md](AGENT_RUNTIME.md)。
 源码导入、后续同步和私有 GitHub 仓库凭据配置见 [SOURCE_SYNC.md](SOURCE_SYNC.md)。
 

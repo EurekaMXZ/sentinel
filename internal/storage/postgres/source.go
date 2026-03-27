@@ -51,15 +51,37 @@ func (s *SourceStore) LoadRepository(ctx context.Context, tenant, repository str
 		WHERE tenant_id=$1 AND repository_id=$2`, tenant, repository))
 }
 
+func (s *SourceStore) ListRepositories(ctx context.Context, tenant string, limit int) ([]source.Repository, error) {
+	if limit <= 0 || limit > 200 {
+		return nil, errors.New("invalid repository page limit")
+	}
+	rows, err := s.pool.Query(ctx, `SELECT `+repositoryColumns+` FROM source_repositories
+		WHERE tenant_id=$1 ORDER BY created_at DESC,repository_id DESC LIMIT $2`, tenant, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	repositories := make([]source.Repository, 0, limit)
+	for rows.Next() {
+		repository, err := scanRepository(rows)
+		if err != nil {
+			return nil, err
+		}
+		repositories = append(repositories, repository)
+	}
+	return repositories, rows.Err()
+}
+
 const syncColumns = `j.tenant_id::text,j.repository_id::text,j.sync_id::text,j.operation_id,
 	j.config_snapshot_object_id::text,j.workflow_id,j.status,j.expected_archive_version,
-	COALESCE(j.result_object_id::text,''),COALESCE(i.lease_owner,''),i.fencing_token,i.request_hash`
+	COALESCE(j.result_object_id::text,''),COALESCE(j.error_object_id::text,''),
+	COALESCE(i.lease_owner,''),i.fencing_token,i.request_hash`
 
 func scanSync(row pgx.Row) (source.SyncJob, error) {
 	var j source.SyncJob
 	err := row.Scan(&j.Request.TenantID, &j.Request.RepositoryID, &j.Request.SyncID, &j.Request.OperationID,
 		&j.ConfigRef, &j.WorkflowID, &j.Status, &j.ExpectedArchiveVersion,
-		&j.ResultRef, &j.Owner, &j.Fence, &j.RequestHash)
+		&j.ResultRef, &j.ErrorRef, &j.Owner, &j.Fence, &j.RequestHash)
 	return j, sourceError(err)
 }
 

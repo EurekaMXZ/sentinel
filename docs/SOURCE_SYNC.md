@@ -40,7 +40,8 @@ go run ./cmd/source-sync -tenant "0194e229-8576-7f42-8f08-3496913847cf" -url "ht
 ```
 
 `-tenant` 是必填的非零 UUID；仓库、同步任务、manifest 和快照 ID 由程序生成 UUIDv7。
-CLI 是管理员入口，租户由调用者明确传入；尚未提供业务 HTTP API。
+CLI 是管理员入口，租户由调用者明确传入。控制 API 也提供仓库注册、同步触发和状态查询，
+见 [控制 API](API.md)。
 
 默认跟踪 `refs/heads/*` 和 `refs/tags/*`，为这些 ref 可达的所有 commit 建立快照。
 也可以在新建仓库时指定范围，例如只跟踪主分支及发布标签：

@@ -11,6 +11,7 @@ deploy/minio/             MinIO 和 mc 的固定版本源码构建
 docs/DEVELOPMENT.md        中间件配置、初始化及启动说明
 docs/SCHEMA.md             数据表、约束及发布事务约定
 docs/AGENT_RUNTIME.md      Agent 启动、SDK 调用与恢复边界
+docs/API.md                控制 API 的请求、响应和状态码
 docs/SOURCE_SYNC.md        GitHub 仓库导入、增量同步及恢复
 cmd/
   api/                    Gin HTTP API 入口
@@ -80,7 +81,9 @@ go run ./cmd/migrate status
 
 ## 启动 API
 
-当前模块名为 `sentinel`，使用 Go 1.27.3 初始化和验证。API 可独立启动：
+当前模块名为 `sentinel`，使用 Go 1.27.3 初始化和验证。控制 API 需要 PostgreSQL、MinIO/S3、
+Temporal 和 `OPENAI_MODEL`；它不调用模型，因此不需要 `OPENAI_API_KEY`。先启动中间件并执行迁移，
+然后设置与 Worker 相同的连接环境变量：
 
 ```powershell
 go run ./cmd/api
@@ -98,7 +101,11 @@ Invoke-RestMethod http://127.0.0.1:8080/healthz
 {"service":"sentinel-api","status":"ok"}
 ```
 
-`/healthz` 只表示 HTTP 进程存活。当前尚未暴露业务 API，也没有声明数据库或任务执行就绪。
+控制 API 位于 `/v1`，当前用 `X-Tenant-ID` 头显式传入租户 UUID；这是管理入口，不是认证机制。
+已提供 Agent 创建/查询/结果/cancel/resume，以及源码仓库、同步任务和就绪版本的查询与触发。
+完整请求和响应见 [控制 API](docs/API.md)。
+
+`/healthz` 只表示 HTTP 进程存活，不声明数据库或任务执行就绪。
 API 带有 JSON 错误响应、请求日志、panic recovery、HTTP 超时和优雅退出。
 
 程序直接读取进程环境变量。[.env.example](.env.example) 是配置清单，不会自动加载。

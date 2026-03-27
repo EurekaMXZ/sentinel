@@ -251,6 +251,10 @@ func TestSourceImportIncrementRetentionAndTenantIsolation(t *testing.T) {
 	if _, err := f.store.LoadManifest(t.Context(), f.repo.TenantID, newID(t), base.ManifestID); !errors.Is(err, source.ErrNotFound) {
 		t.Fatalf("cross-repository archive=%v", err)
 	}
+	repositories, err := f.store.ListRepositories(t.Context(), f.repo.TenantID, 10)
+	if err != nil || len(repositories) != 1 || repositories[0].ID != f.repo.ID {
+		t.Fatalf("list repositories: %+v err=%v", repositories, err)
+	}
 }
 
 type publicationFailure struct{ source.SyncStore }

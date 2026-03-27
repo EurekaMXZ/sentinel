@@ -95,6 +95,19 @@ type Task struct {
 	DelegationScope   []ResourceBinding `json:"delegation_scope"`
 }
 
+const DefaultInstructions = "You are Sentinel, a task-oriented Agent. Use only available tools. Resource bindings identify inputs, not their contents. Delegate bounded tasks only when useful. Report what you could verify and what remains unknown."
+
+// DefaultTools is the server-assigned tool policy for root Agents.
+func DefaultTools() []string {
+	return append([]string{ChildToolName}, source.ToolNames()...)
+}
+
+// NewRootTask builds the immutable task payload used by the CLI and HTTP API.
+func NewRootTask(prompt, contextRef, model string, limits Limits, tools []string, sourceTaskQueue string) Task {
+	return Task{Prompt: prompt, Instructions: DefaultInstructions, InitialContextRef: contextRef,
+		Model: model, Tools: append([]string(nil), tools...), SourceTaskQueue: sourceTaskQueue, Limits: limits}
+}
+
 type WorkflowInput struct {
 	Session SessionInput   `json:"session"`
 	Resume  *ContinueState `json:"resume,omitempty"`
@@ -176,6 +189,10 @@ type AgentRecord struct {
 	ParentToolExecutionID string
 	Status                string
 	ResultRef             string
+	ErrorRef              string
+	CreatedAt             time.Time
+	StartedAt             *time.Time
+	FinishedAt            *time.Time
 	Head                  agentctx.Head
 	Resources             []ResourceBinding
 }
