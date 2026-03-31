@@ -40,6 +40,7 @@ internal/
     reader.go             目录、文件、搜索和版本差异接口
     archive.go            bundle 清单及恢复接口
   relay/                  outbox、事件索引和重试实现位置
+  stream/                 Redis Streams + Pub/Sub 事件流和 SSE 回放
   llm/openai/             官方 OpenAI SDK Responses 适配
   payload/                租户隔离的不可变正文存储接口
   platform/
@@ -55,11 +56,11 @@ internal/
 需要 Docker Engine（Linux containers）和 Docker Compose V2。在项目根目录执行：
 
 ```powershell
-docker compose --env-file .env.example up -d --build --wait postgres minio temporal
+docker compose --env-file .env.example up -d --build --wait postgres minio redis temporal
 docker compose --env-file .env.example run --build --rm minio-init
 ```
 
-PostgreSQL、MinIO 和 Temporal 均使用命名卷持久化。初始化任务创建私有 `sentinel` bucket。
+PostgreSQL、MinIO、Redis 和 Temporal 均使用命名卷持久化。初始化任务创建私有 `sentinel` bucket。
 Temporal UI 为 `http://127.0.0.1:8233`，MinIO Console 为 `http://127.0.0.1:9001`。
 MinIO 使用固定源码版本构建，首次启动需要下载和编译依赖。
 完整配置、默认凭据、环境变量和停止方式见 [本地开发环境](docs/DEVELOPMENT.md)。
@@ -82,7 +83,7 @@ go run ./cmd/migrate status
 ## 启动 API
 
 当前模块名为 `sentinel`，使用 Go 1.27.3 初始化和验证。控制 API 需要 PostgreSQL、MinIO/S3、
-Temporal 和 `OPENAI_MODEL`；它不调用模型，因此不需要 `OPENAI_API_KEY`。先启动中间件并执行迁移，
+Temporal 和 `OPENAI_MODEL`；SSE 还需要 Redis。它不调用模型，因此不需要 `OPENAI_API_KEY`。先启动中间件并执行迁移，
 然后设置与 Worker 相同的连接环境变量：
 
 ```powershell
@@ -102,8 +103,8 @@ Invoke-RestMethod http://127.0.0.1:8080/healthz
 ```
 
 控制 API 位于 `/v1`，当前用 `X-Tenant-ID` 头显式传入租户 UUID；这是管理入口，不是认证机制。
-已提供 Agent 创建/查询/结果/cancel/resume，以及源码仓库、同步任务和就绪版本的查询与触发。
-完整请求和响应见 [控制 API](docs/API.md)。
+已提供 Agent 创建/查询/结果/cancel/resume、SSE 实时流与历史回放，以及源码仓库、同步任务和
+就绪版本的查询与触发。完整请求和响应见 [控制 API](docs/API.md)。
 
 `/healthz` 只表示 HTTP 进程存活，不声明数据库或任务执行就绪。
 API 带有 JSON 错误响应、请求日志、panic recovery、HTTP 超时和优雅退出。
@@ -162,6 +163,7 @@ CLI 输出仓库、同步和 Workflow ID；`-wait` 等待归档发布并输出�
 - Agent 和子 Agent 各自选择零到多个仓库、快照或文档资源，运行不要求绑定源码。
 - 模型通过明确的快照 ID 查看目录、文件、搜索及 diff；每次源码调用保存实际版本以便重试和核对证据。
 - Workflow 只传递状态和引用，源码正文、模型 I/O 与大工具结果保存在对象存储。
+- 配置 Redis 后，模型流式增量通过 Pub/Sub 实时推送，并写入 Redis Streams 供 SSE 回放。
 
 模型请求通过已有的官方 `openai-go/v3` SDK 发往 Responses API。请求、原始响应、工具结果和 Context
 保存在 S3，PostgreSQL 保存引用、幂等状态、租约、检查点及 outbox。Temporal History 只携带引用和游标。

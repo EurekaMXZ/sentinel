@@ -18,6 +18,7 @@ import (
 	sourceactivity "sentinel/internal/source/activity"
 	"sentinel/internal/storage/postgres"
 	"sentinel/internal/storage/s3"
+	"sentinel/internal/stream"
 )
 
 func openAPIRuntime(ctx context.Context, cfg config.Config, logger *slog.Logger) (*api.Dependencies, func(), error) {
@@ -57,6 +58,17 @@ func openAPIRuntime(ctx context.Context, cfg config.Config, logger *slog.Logger)
 	payloads := s3.NewPayloadStore(objectClient, cfg.S3.Bucket, index)
 	agentStore := postgres.NewAgentStore(pool)
 	sourceStore := postgres.NewSourceStore(pool)
+	var streamReader stream.Reader
+	var redisStream *stream.Redis
+	if cfg.Redis.Addr != "" {
+		redisStream, err = stream.NewRedis(ctx, streamConfig(cfg))
+		if err != nil {
+			logger.Warn("streaming disabled", "error", err)
+			redisStream = nil
+		} else {
+			streamReader = redisStream
+		}
+	}
 	dependencies := &api.Dependencies{
 		Agents:         agentStore,
 		AgentTasks:     &agentactivity.Activities{Store: agentStore, Payloads: payloads, Tools: agentactivity.SourceToolSet()},
@@ -65,10 +77,14 @@ func openAPIRuntime(ctx context.Context, cfg config.Config, logger *slog.Logger)
 		SourceTasks:    &sourceactivity.Activities{Store: sourceStore, Payloads: payloads},
 		Payloads:       payloads,
 		Workflows:      temporalClient,
+		Streams:        streamReader,
 		AgentTaskQueue: cfg.Temporal.AgentTaskQueue, SourceTaskQueue: cfg.Temporal.SourceTaskQueue,
 		Model: cfg.OpenAI.Model, Limits: limits,
 	}
 	closeRuntime := func() {
+		if redisStream != nil {
+			_ = redisStream.Close()
+		}
 		temporalClient.Close()
 		pool.Close()
 	}

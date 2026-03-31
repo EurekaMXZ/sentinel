@@ -16,6 +16,7 @@ type Config struct {
 	Postgres        Postgres
 	S3              S3
 	OpenAI          OpenAI
+	Redis           Redis
 	Source          Source
 	ShutdownTimeout time.Duration
 }
@@ -58,6 +59,13 @@ type OpenAI struct {
 	ContextWindowTokens     int64
 	ContextSafetyTokens     int64
 	CompactStructuredOutput bool
+}
+
+type Redis struct {
+	Addr      string
+	Password  string
+	DB        int
+	StreamTTL time.Duration
 }
 
 type Source struct {
@@ -110,6 +118,7 @@ func load(lookup func(string) (string, bool)) (Config, error) {
 			ContextSafetyTokens:     8192,
 			CompactStructuredOutput: true,
 		},
+		Redis: Redis{Addr: env("REDIS_ADDR", ""), Password: env("REDIS_PASSWORD", ""), StreamTTL: 168 * time.Hour},
 		Source: Source{
 			GitBinary:      env("GIT_BINARY", "git"),
 			CacheDir:       env("SOURCE_CACHE_DIR", "var/git"),
@@ -174,6 +183,25 @@ func load(lookup func(string) (string, bool)) (Config, error) {
 			return Config{}, fmt.Errorf("OPENAI_COMPACT_STRUCTURED_OUTPUT must be a boolean")
 		}
 		cfg.OpenAI.CompactStructuredOutput = value
+	}
+	if raw := env("REDIS_DB", ""); raw != "" {
+		value, err := strconv.Atoi(raw)
+		if err != nil || value < 0 || value > 15 {
+			return Config{}, fmt.Errorf("REDIS_DB must be between 0 and 15")
+		}
+		cfg.Redis.DB = value
+	}
+	if raw := env("REDIS_STREAM_TTL", ""); raw != "" {
+		value, err := time.ParseDuration(raw)
+		if err != nil || value <= 0 {
+			return Config{}, fmt.Errorf("REDIS_STREAM_TTL must be a positive duration")
+		}
+		cfg.Redis.StreamTTL = value
+	}
+	if cfg.Redis.Addr != "" {
+		if _, _, err := net.SplitHostPort(cfg.Redis.Addr); err != nil {
+			return Config{}, fmt.Errorf("REDIS_ADDR must be a host:port address")
+		}
 	}
 	for _, address := range []struct {
 		key   string

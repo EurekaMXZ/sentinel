@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"sync/atomic"
 	"time"
 
 	openaigo "github.com/openai/openai-go/v3"
@@ -15,6 +16,7 @@ import (
 
 	"sentinel/internal/agent"
 	modelapi "sentinel/internal/llm/openai"
+	"sentinel/internal/stream"
 )
 
 type argumentsDocument struct {
@@ -112,7 +114,33 @@ func (a *Activities) send(ctx context.Context, task agent.Task, step agent.StepR
 	// Decoding nested request unions and re-encoding them can omit input items.
 	request := param.Override[responses.ResponseNewParams](saved)
 	requestCtx, cancel := context.WithTimeout(ctx, task.Limits.ModelTimeout)
-	completion, callErr := a.Model.Complete(requestCtx, request, step.OperationID)
+	var completion modelapi.Completion
+	var callErr error
+	var publishDisabled atomic.Bool
+	if a.Streams != nil {
+		started, err := stream.NewEvent(stream.EventModelStarted, step.Input.StepID, step.FencingToken,
+			map[string]string{"model": task.Model})
+		if err == nil {
+			if err := a.publishStreamEvent(ctx, step, started); err != nil {
+				publishDisabled.Store(true)
+			}
+		}
+		completion, callErr = a.Model.Stream(requestCtx, request, step.OperationID, func(delta modelapi.StreamDelta) error {
+			if publishDisabled.Load() {
+				return nil
+			}
+			event, err := stream.NewEvent(stream.EventModelDelta, step.Input.StepID, step.FencingToken, delta)
+			if err != nil {
+				return nil
+			}
+			if err := a.publishStreamEvent(requestCtx, step, event); err != nil {
+				publishDisabled.Store(true)
+			}
+			return nil
+		})
+	} else {
+		completion, callErr = a.Model.Complete(requestCtx, request, step.OperationID)
+	}
 	cancel()
 	// Preserve a known outcome even if cancellation arrived while the SDK was
 	// returning. This bounded cleanup never sends another upstream request.
@@ -134,6 +162,7 @@ func (a *Activities) send(ctx context.Context, task agent.Task, step agent.StepR
 		if err := a.Store.ReleaseStep(saveCtx, step, status, ref); err != nil {
 			return step, err
 		}
+		a.publishModelStatus(saveCtx, step, stream.EventModelFailed, map[string]string{"status": status, "code": code})
 		if status == "pending" {
 			return step, errors.New(code)
 		}
@@ -155,7 +184,23 @@ func (a *Activities) send(ctx context.Context, task agent.Task, step agent.StepR
 		return step, err
 	}
 	step.Status = "response_saved"
+	a.publishModelStatus(saveCtx, step, stream.EventModelCompleted, map[string]string{"status": "completed"})
 	return step, nil
+}
+
+func (a *Activities) publishModelStatus(ctx context.Context, step agent.StepRecord, eventType string, data any) {
+	a.publishEvent(ctx, step.Input.Session.TenantID, step.Input.Session.AgentID, eventType,
+		step.Input.StepID, step.FencingToken, data)
+}
+
+func (a *Activities) publishStreamEvent(ctx context.Context, step agent.StepRecord, event stream.Event) error {
+	if a.Streams == nil {
+		return nil
+	}
+	publishCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+	defer cancel()
+	_, err := a.Streams.Publish(publishCtx, step.Input.Session.TenantID, step.Input.Session.AgentID, event)
+	return err
 }
 
 func (a *Activities) buildRequest(ctx context.Context, record agent.AgentRecord, task agent.Task) (responses.ResponseNewParams, error) {

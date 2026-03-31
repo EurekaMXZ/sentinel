@@ -7,6 +7,7 @@ import (
 
 	"sentinel/internal/agent"
 	"sentinel/internal/source"
+	"sentinel/internal/stream"
 )
 
 // AgentReader is the read side of the Agent control API.
@@ -57,6 +58,7 @@ type Dependencies struct {
 	SourceTasks     SourceCreator
 	Payloads        PayloadReader
 	Workflows       Workflows
+	Streams         stream.Reader
 	AgentTaskQueue  string
 	SourceTaskQueue string
 	Model           string

@@ -11,7 +11,7 @@ import (
 )
 
 func RunAgentWorker(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
-	activities, closeRuntime, err := openAgentRuntime(ctx, cfg)
+	activities, closeRuntime, err := openAgentRuntime(ctx, cfg, logger)
 	if err != nil {
 		return err
 	}

@@ -30,6 +30,9 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.OpenAI.ContextWindowTokens != 128000 || cfg.OpenAI.ContextSafetyTokens != 8192 || !cfg.OpenAI.CompactStructuredOutput {
 		t.Fatalf("unexpected context compact defaults: %+v", cfg.OpenAI)
 	}
+	if cfg.Redis.Addr != "" || cfg.Redis.DB != 0 || cfg.Redis.StreamTTL != 168*time.Hour {
+		t.Fatalf("unexpected Redis defaults: %+v", cfg.Redis)
+	}
 }
 
 func TestLoadOverrides(t *testing.T) {
@@ -42,6 +45,9 @@ func TestLoadOverrides(t *testing.T) {
 		"OPENAI_CONTEXT_WINDOW_TOKENS":     "64000",
 		"OPENAI_CONTEXT_SAFETY_TOKENS":     "4096",
 		"OPENAI_COMPACT_STRUCTURED_OUTPUT": "false",
+		"REDIS_ADDR":                       "127.0.0.1:6380",
+		"REDIS_DB":                         "2",
+		"REDIS_STREAM_TTL":                 "24h",
 	}))
 	if err != nil {
 		t.Fatal(err)
@@ -51,6 +57,9 @@ func TestLoadOverrides(t *testing.T) {
 	}
 	if cfg.OpenAI.ContextWindowTokens != 64000 || cfg.OpenAI.ContextSafetyTokens != 4096 || cfg.OpenAI.CompactStructuredOutput {
 		t.Fatalf("context compact overrides were not applied: %+v", cfg.OpenAI)
+	}
+	if cfg.Redis.Addr != "127.0.0.1:6380" || cfg.Redis.DB != 2 || cfg.Redis.StreamTTL != 24*time.Hour {
+		t.Fatalf("Redis overrides were not applied: %+v", cfg.Redis)
 	}
 }
 
@@ -74,6 +83,9 @@ func TestLoadRejectsInvalidConfiguration(t *testing.T) {
 		{"OPENAI_CONTEXT_SAFETY_TOKENS", "0"},
 		{"OPENAI_CONTEXT_SAFETY_TOKENS", "128000"},
 		{"OPENAI_COMPACT_STRUCTURED_OUTPUT", "sometimes"},
+		{"REDIS_DB", "16"},
+		{"REDIS_STREAM_TTL", "0s"},
+		{"REDIS_ADDR", "localhost"},
 	} {
 		t.Run(test.key, func(t *testing.T) {
 			_, err := load(lookup(map[string]string{test.key: test.value}))

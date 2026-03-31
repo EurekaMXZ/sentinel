@@ -55,6 +55,21 @@ services:
         mc mb --ignore-existing "local/$${S3_BUCKET}"
         mc stat "local/$${S3_BUCKET}"
 
+  redis:
+    image: redis:7.4-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--save", "60", "1"]
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 5s
+
   temporal:
     image: temporalio/temporal:1.9.1
     restart: unless-stopped
@@ -80,4 +95,5 @@ services:
 volumes:
   postgres-data:
   minio-data:
+  redis-data:
   temporal-data:

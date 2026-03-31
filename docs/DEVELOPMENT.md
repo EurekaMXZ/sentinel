@@ -10,10 +10,12 @@ Windows 可使用 Docker Desktop。API 和三个 Worker 仍通过本机 Go 启�
 | PostgreSQL 17 | `127.0.0.1:5432` | 业务元数据、快照索引、CAS、幂等记录 |
 | MinIO S3 | `127.0.0.1:9000` | 源码 bundle、manifest、Context 和事件正文 |
 | MinIO Console | `http://127.0.0.1:9001` | 查看 bucket 和对象 |
+| Redis | `127.0.0.1:6379` | SSE 事件流：Streams 历史与 Pub/Sub 实时推送 |
 | Temporal gRPC | `127.0.0.1:7233` | Workflow 和 Activity 调度 |
 | Temporal UI | `http://127.0.0.1:8233` | 查看 Workflow、重试和执行历史 |
 
-全部发布端口仅绑定 `127.0.0.1`。当前架构不需要额外启动 Redis、Kafka 或 Elasticsearch。
+全部发布端口仅绑定 `127.0.0.1`。Redis 启用 AOF 并保存到命名卷；不配置 `REDIS_ADDR` 时，
+流式接口关闭，但 Agent 执行不受影响。当前架构不需要 Kafka 或 Elasticsearch。
 
 Temporal 使用官方 CLI 镜像的 `server start-dev`，自动创建 `default` namespace 并启动 UI。
 SQLite 数据库保存在命名卷中，容器重建后仍可恢复。这与保存业务元数据的 PostgreSQL 是两套独立存储。
@@ -29,11 +31,11 @@ MinIO 和 `mc` 从 Dockerfile 中固定的官方源码标签构建，避免依�
 
 ```powershell
 docker compose --env-file .env.example config --quiet
-docker compose --env-file .env.example up -d --build --wait postgres minio temporal
+docker compose --env-file .env.example up -d --build --wait postgres minio redis temporal
 docker compose --env-file .env.example run --build --rm minio-init
 ```
 
-第一条命令检查配置；第二条等待三个长期服务的健康检查通过；第三条创建默认 `sentinel` bucket，
+第一条命令检查配置；第二条等待四个长期服务的健康检查通过；第三条创建默认 `sentinel` bucket，
 重复运行会保留已有 bucket 和对象。bucket 默认私有，不设置匿名访问权限。
 初始化返回非零退出码时应先检查错误，修复后重新运行该命令。
 
@@ -52,6 +54,7 @@ docker compose --env-file .env.example run --build --rm minio-init
 | MinIO access key | `sentinel-dev` |
 | MinIO secret key | `sentinel-dev-secret` |
 | S3 bucket | `sentinel` |
+| Redis | `127.0.0.1:6379`，无密码，DB 0 |
 | Temporal namespace | `default` |
 
 `minio-init` 只创建 bucket；PostgreSQL 镜像创建业务数据库和用户，业务表由下面的迁移命令建立。
@@ -114,6 +117,9 @@ $env:S3_SECRET_KEY = "sentinel-dev-secret"
 $env:S3_USE_TLS = "false"
 $env:TEMPORAL_ADDRESS = "127.0.0.1:7233"
 $env:TEMPORAL_NAMESPACE = "default"
+$env:OPENAI_MODEL = "填入可访问的模型 ID"
+$env:REDIS_ADDR = "127.0.0.1:6379"
+$env:REDIS_STREAM_TTL = "168h"
 $env:GIN_MODE = "release"
 go run ./cmd/api
 ```
@@ -131,6 +137,12 @@ $env:OPENAI_CONTEXT_SAFETY_TOKENS = "8192"
 `OPENAI_COMPACT_STRUCTURED_OUTPUT=false` 可关闭 Compact 请求的 JSON Schema 输出。
 控制 API 需要 `OPENAI_MODEL` 来保存新任务，但自身不调用模型，因此不需要 `OPENAI_API_KEY`。
 Source Worker 和 Relay Worker 不需要模型配置。
+
+SSE 流式输出需要 API 和 Agent Worker 使用相同的 Redis 配置。Agent Worker 未配置 Redis 时仍正常执行，
+但不会产生流式事件；API 未配置 Redis 时 `/v1/agents/{id}/stream` 返回 `503 streaming_disabled`。
+`REDIS_STREAM_TTL` 控制流历史保留时间，默认 168 小时。
+当前 Redis 适配使用内置的最小 RESP2 明文客户端，支持密码和 DB 选择；生产环境应通过私有网络或
+TLS 终止代理保护 Redis，尚未支持 Redis Cluster / Sentinel。
 
 `S3_ENDPOINT` 不带 `http://` 前缀。更改 `.env` 的数据库或 MinIO 凭据时，也应同步修改终端环境变量；
 数据库用户名、密码或库名包含 URI 特殊字符时，DSN 中需要 URL 编码。
@@ -182,7 +194,7 @@ API 启动后可用 `Invoke-RestMethod http://127.0.0.1:8080/healthz` 验证 HTT
 docker compose --env-file .env.example down
 ```
 
-普通 `down` 保留 `postgres-data`、`minio-data`、`temporal-data` 三个命名卷。
+普通 `down` 保留 `postgres-data`、`minio-data`、`redis-data`、`temporal-data` 四个命名卷。
 不要为日常停止添加 `--volumes`，该选项会删除上述持久数据。
 PostgreSQL 的 `POSTGRES_*` 初始化变量只对空数据目录生效；已有数据库修改密码应通过 SQL 完成，
 仅修改 `.env` 不会改变已有数据库用户的密码。

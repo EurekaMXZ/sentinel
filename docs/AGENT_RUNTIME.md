@@ -147,6 +147,21 @@ go run ./cmd/agent -tenant "0194e229-8576-7f42-8f08-3496913847cf" -resume "已�
 它不替换任务、资源或限制，也不重新启动已失败 / 已取消的 Agent。子 Agent 由父 Workflow 调度。
 Worker 正常退出或暂时不可用时，Temporal 保留历史并在 Worker 恢复后继续派发任务。
 
+## 流式事件
+
+Agent Worker 配置 `REDIS_ADDR` 后，模型 Activity 使用官方 SDK 的 `Responses.NewStreaming` 读取上游
+流式响应，并把文本增量和 function call 参数增量发布为 `model.delta`。最终 `response.completed`
+响应仍按原路径保存到 S3，Context、检查点和重试语义不变；Redis 发布失败只记录告警，不阻断模型调用。
+
+同时发布的生命周期事件包括 `agent.status`、`step.completed`、`model.started`、`model.completed`、
+`model.failed`、`tool.started`、`tool.completed`、`context.compacted` 和终态事件。
+推理内容和加密推理上下文不下发。
+
+每个事件通过 `XADD` 写入按租户 / Agent 分离的 Redis Stream，并 `PUBLISH` 到对应 Pub/Sub 频道。
+Stream 是完整历史，TTL 由 `REDIS_STREAM_TTL` 控制；Pub/Sub 只负责实时投递。SSE 接口先订阅，
+再按 `Last-Event-ID` 回放 Stream 历史，并按 Stream ID 去重实时消息。未配置 Redis 时模型调用使用
+普通非流式请求，SSE 接口返回不可用。
+
 ## Context Compact
 
 每次 `Initialize` 和 `Checkpoint` 都会估算下一次模型请求的 token 数。超过预算时，

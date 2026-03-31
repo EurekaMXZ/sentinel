@@ -9,6 +9,7 @@ import (
 
 	"sentinel/internal/agent"
 	"sentinel/internal/source"
+	"sentinel/internal/stream"
 )
 
 type childArguments struct {
@@ -77,6 +78,8 @@ func (a *Activities) PrepareTool(ctx context.Context, input agent.ToolInput) (ag
 	if failureCode != "" {
 		return a.toolFailure(ctx, record, failureCode)
 	}
+	a.publishEvent(ctx, input.Step.Session.TenantID, input.Step.Session.AgentID, stream.EventToolStarted,
+		input.Step.StepID, 0, map[string]string{"tool": input.Call.Name})
 	if input.Call.Name != agent.ChildToolName {
 		if sourceRequest != nil {
 			plan.Source = sourceRequest
@@ -399,6 +402,11 @@ func (a *Activities) saveTool(ctx context.Context, record agent.ToolRecord, outp
 		record.Status = "succeeded"
 	}
 	record, err = a.Store.SaveToolResult(ctx, record)
+	if err == nil {
+		a.publishEvent(ctx, record.Input.Step.Session.TenantID, record.Input.Step.Session.AgentID,
+			stream.EventToolCompleted, record.Input.Step.StepID, 0,
+			map[string]string{"tool": record.Input.Call.Name, "status": record.Status})
+	}
 	return planFor(record), err
 }
 

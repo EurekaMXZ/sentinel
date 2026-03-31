@@ -25,9 +25,10 @@ import (
 	"sentinel/internal/platform/temporal"
 	"sentinel/internal/storage/postgres"
 	"sentinel/internal/storage/s3"
+	"sentinel/internal/stream"
 )
 
-func openAgentRuntime(ctx context.Context, cfg config.Config) (*activity.Activities, func(), error) {
+func openAgentRuntime(ctx context.Context, cfg config.Config, logger *slog.Logger) (*activity.Activities, func(), error) {
 	model, err := modelapi.NewModel(cfg.OpenAI)
 	if err != nil {
 		return nil, nil, err
@@ -54,9 +55,23 @@ func openAgentRuntime(ctx context.Context, cfg config.Config) (*activity.Activit
 	if err != nil {
 		return nil, nil, err
 	}
-	return &activity.Activities{Store: postgres.NewAgentStore(pool), Model: model, Tools: activity.SourceToolSet(),
+	activities := &activity.Activities{Store: postgres.NewAgentStore(pool), Model: model, Tools: activity.SourceToolSet(),
 		Payloads:                s3.NewPayloadStore(objectClient, cfg.S3.Bucket, postgres.NewPayloadIndex(pool)),
-		CompactStructuredOutput: cfg.OpenAI.CompactStructuredOutput}, pool.Close, nil
+		CompactStructuredOutput: cfg.OpenAI.CompactStructuredOutput}
+	closeRuntime := func() { pool.Close() }
+	if cfg.Redis.Addr != "" {
+		redisStream, streamErr := stream.NewRedis(ctx, streamConfig(cfg))
+		if streamErr != nil {
+			logger.Warn("streaming disabled", "error", streamErr)
+		} else {
+			activities.Streams = redisStream
+			closeRuntime = func() {
+				_ = redisStream.Close()
+				pool.Close()
+			}
+		}
+	}
+	return activities, closeRuntime, nil
 }
 
 func registerAgent(registry worker.Registry, activities *activity.Activities) {
@@ -98,7 +113,7 @@ func StartAgent(ctx context.Context, cfg config.Config, logger *slog.Logger, opt
 	if options.ResumeID != "" && (options.Prompt != "" || options.ContextRef != "" || len(options.Resources) != 0) {
 		return errors.New("resume accepts an existing Agent ID without new task inputs")
 	}
-	activities, closeRuntime, err := openAgentRuntime(ctx, cfg)
+	activities, closeRuntime, err := openAgentRuntime(ctx, cfg, logger)
 	if err != nil {
 		return err
 	}

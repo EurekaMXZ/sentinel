@@ -1,11 +1,13 @@
 # 控制 API
 
 控制 API 用于创建和查询 Agent、管理源码仓库与同步任务。当前版本不提供认证或租户管理：
-每个 `/v1` 请求都必须带 `X-Tenant-ID` 头，内容是调用方声明的非零 UUID。该头是管理入口的
-显式输入，不是授权机制；API 默认只监听 `127.0.0.1:8080`，不要直接暴露到不可信网络。
+每个 `/v1` 请求都必须提供租户，优先使用 `X-Tenant-ID` 头，也可以使用 `tenant_id` 查询参数
+（浏览器 `EventSource` 无法设置自定义头，SSE 用查询参数）。内容必须是调用方声明的非零 UUID。
+该输入是管理入口的显式参数，不是授权机制；API 默认只监听 `127.0.0.1:8080`，不要直接暴露到不可信网络。
 
-API 需要 PostgreSQL、MinIO/S3、Temporal 和 `OPENAI_MODEL`。它不调用模型，因此不需要
-`OPENAI_API_KEY`；Agent Worker 仍需该 key。启动和迁移步骤见 [本地开发环境](DEVELOPMENT.md)。
+API 需要 PostgreSQL、MinIO/S3、Temporal 和 `OPENAI_MODEL`。SSE 还需要 Redis；未配置 Redis 时
+仅流式接口不可用。API 不调用模型，因此不需要 `OPENAI_API_KEY`；Agent Worker 仍需该 key。
+启动和迁移步骤见 [本地开发环境](DEVELOPMENT.md)。
 
 ## 通用约定
 
@@ -118,6 +120,38 @@ POST /v1/agents/{agent_id}/resume
 - resume 连接或重新调度已持久化的根 Agent；不会替换任务、资源或限制。已完成时返回当前状态，
   失败/取消时返回 `409 agent_terminal`，其他情况返回 `202`。
 - cancel/resume 只接受根 Agent；子 Agent 由父 Workflow 管理。
+
+### 流式事件（SSE）
+
+```http
+GET /v1/agents/{agent_id}/stream?tenant_id=0194e229-8576-7f42-8f08-3496913847cf
+Accept: text/event-stream
+Last-Event-ID: 1729490000000-0
+```
+
+浏览器 `EventSource` 可以使用上述查询参数；服务端也接受 `X-Tenant-ID` 头。
+
+- 返回 `text/event-stream`。首次连接从 Redis Stream 回放完整历史；浏览器自动携带
+  `Last-Event-ID` 时只回放该 ID 之后的事件，也支持 `?last_event_id=` 查询参数。
+- 回放期间先订阅 Pub/Sub，再读取 Stream 历史，最后按 Stream ID 去重转发实时消息。
+- 每条事件：
+
+```text
+id: 1729490000000-0
+event: model.delta
+data: {"type":"model.delta","step_id":1,"attempt":1,"data":{"kind":"text","text":"Hello"},"created_at":"2026-10-21T..."}
+```
+
+- `id` 是 Redis Stream ID，作为 SSE 重连游标；`event` 与 JSON 中的 `type` 相同。
+- 事件类型：`agent.status`、`step.completed`、`model.started`、`model.delta`、
+  `model.completed`、`model.failed`、`tool.started`、`tool.completed`、
+  `context.compacted`、`agent.completed`、`agent.failed`、`agent.cancelled`。
+- `model.delta` 的 `data.kind` 为 `text` 或 `arguments`；推理内容和加密推理上下文不会下发。
+- 收到 `agent.completed`、`agent.failed` 或 `agent.cancelled` 后连接自动关闭。
+- 历史保留时间由 `REDIS_STREAM_TTL` 控制（默认 168 小时）。过期后仍可通过
+  `GET /v1/agents/{agent_id}/result` 读取最终结果。
+- API 和 Agent Worker 必须配置相同的 `REDIS_ADDR`。API 未配置 Redis 时返回
+  `503 streaming_disabled`；Agent Worker 未配置时任务正常执行，但没有流式事件。
 
 ## 源码仓库
 

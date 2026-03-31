@@ -28,6 +28,7 @@ func NewRouter(logger *slog.Logger, deps Dependencies) *gin.Engine {
 		v1.GET("/agents", listAgents(deps, logger))
 		v1.GET("/agents/:agent_id", getAgent(deps, logger))
 		v1.GET("/agents/:agent_id/result", getAgentResult(deps, logger))
+		v1.GET("/agents/:agent_id/stream", streamAgent(deps, logger))
 		v1.POST("/agents/:agent_id/cancel", cancelAgent(deps, logger))
 		v1.POST("/agents/:agent_id/resume", resumeAgent(deps, logger))
 
@@ -64,6 +65,11 @@ func requestLogger(logger *slog.Logger) gin.HandlerFunc {
 func tenantMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		raw := strings.TrimSpace(c.GetHeader("X-Tenant-ID"))
+		if raw == "" {
+			// EventSource cannot set request headers; the query parameter is the
+			// browser-compatible fallback for SSE and simple clients.
+			raw = strings.TrimSpace(c.Query("tenant_id"))
+		}
 		id, err := uuid.Parse(raw)
 		if err != nil || id == uuid.Nil {
 			errorJSON(c, http.StatusBadRequest, "tenant_required", "X-Tenant-ID must be a nonzero UUID")

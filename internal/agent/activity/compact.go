@@ -16,6 +16,7 @@ import (
 
 	"sentinel/internal/agent"
 	modelapi "sentinel/internal/llm/openai"
+	"sentinel/internal/stream"
 )
 
 const (
@@ -157,6 +158,8 @@ func (a *Activities) Compact(ctx context.Context, input agent.CompactInput) (age
 	if err != nil {
 		return agent.Progress{}, runtimeError("publish_compact", err)
 	}
+	a.publishEvent(ctx, input.Session.TenantID, input.Session.AgentID, stream.EventContextCompacted, 0, 0,
+		map[string]int64{"context_version": record.Head.ContextVersion})
 	return progress(record, task), nil
 }
 

@@ -16,10 +16,12 @@ import (
 	"sentinel/internal/agent"
 	modelapi "sentinel/internal/llm/openai"
 	"sentinel/internal/payload"
+	"sentinel/internal/stream"
 )
 
 type Model interface {
 	Complete(context.Context, responses.ResponseNewParams, string) (modelapi.Completion, error)
+	Stream(context.Context, responses.ResponseNewParams, string, func(modelapi.StreamDelta) error) (modelapi.Completion, error)
 }
 
 // Tool handlers must be read-only or implement idempotency using OperationID.
@@ -42,6 +44,7 @@ type Activities struct {
 	Payloads                payload.Store
 	Model                   Model
 	Tools                   map[string]Tool
+	Streams                 stream.Publisher
 	CompactStructuredOutput bool
 }
 
@@ -71,6 +74,8 @@ func (a *Activities) Initialize(ctx context.Context, input agent.InitializeInput
 	if err != nil {
 		return agent.Progress{}, runtimeError("start_agent", err)
 	}
+	a.publishEvent(ctx, input.Session.TenantID, input.Session.AgentID, stream.EventAgentStatus, 0, 0,
+		map[string]string{"status": record.Status})
 	result := progress(record, task)
 	if record.Status == "running" && record.Head.SnapshotRef != "" {
 		var snapshot ContextSnapshot
@@ -195,7 +200,16 @@ func (a *Activities) Finish(ctx context.Context, input agent.FinishInput) error 
 	if err != nil {
 		return err
 	}
-	return a.Store.FinishAgent(ctx, input, ref)
+	if err := a.Store.FinishAgent(ctx, input, ref); err != nil {
+		return err
+	}
+	eventType := stream.EventAgentFailed
+	if input.Status == "cancelled" {
+		eventType = stream.EventAgentCancelled
+	}
+	a.publishEvent(ctx, input.Session.TenantID, input.Session.AgentID, eventType, 0, 0,
+		map[string]string{"status": input.Status, "code": input.Code})
+	return nil
 }
 
 func (a *Activities) putJSON(ctx context.Context, tenantID, kind string, value any) (string, error) {

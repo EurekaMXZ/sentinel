@@ -12,6 +12,7 @@ import (
 	"sentinel/internal/agent"
 	"sentinel/internal/eventlog"
 	modelapi "sentinel/internal/llm/openai"
+	"sentinel/internal/stream"
 )
 
 func (a *Activities) Checkpoint(ctx context.Context, input agent.StepInput) (agent.Progress, error) {
@@ -157,6 +158,14 @@ func (a *Activities) Checkpoint(ctx context.Context, input agent.StepInput) (age
 	record, err = a.Store.CommitStep(ctx, checkpoint)
 	if err != nil {
 		return agent.Progress{}, runtimeError("commit_step", err)
+	}
+	if checkpoint.ResultRef != "" {
+		a.publishEvent(ctx, input.Session.TenantID, input.Session.AgentID, stream.EventAgentCompleted,
+			input.StepID, 0, map[string]string{"result_ref": checkpoint.ResultRef})
+	} else {
+		a.publishEvent(ctx, input.Session.TenantID, input.Session.AgentID, stream.EventStepCompleted,
+			input.StepID, 0, map[string]int64{"context_version": record.Head.ContextVersion,
+				"event_sequence": record.Head.LastEventSequence})
 	}
 	result := progress(record, task)
 	if checkpoint.ResultRef == "" && record.Status == "running" {

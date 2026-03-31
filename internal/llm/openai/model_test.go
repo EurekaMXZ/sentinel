@@ -77,6 +77,58 @@ func TestOfficialSDKRequestAndReasoningRoundTrip(t *testing.T) {
 	}
 }
 
+func TestStreamingForwardsDeltasAndReturnsFinalResponse(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Error(err)
+		}
+		if body["stream"] != true {
+			t.Errorf("streaming request did not set stream=true: %v", body)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			t.Fatal("test server is not flushable")
+		}
+		write := func(data string) {
+			io.WriteString(w, "data: "+data+"\n\n")
+			flusher.Flush()
+		}
+		write(`{"type":"response.created","response":{"id":"resp-stream","object":"response","status":"in_progress","output":[]}}`)
+		write(`{"type":"response.output_text.delta","delta":"Hel","item_id":"msg-1","output_index":0,"content_index":0}`)
+		write(`{"type":"response.output_text.delta","delta":"lo","item_id":"msg-1","output_index":0,"content_index":0}`)
+		write(`{"type":"response.completed","response":{"id":"resp-stream","object":"response","status":"completed","output":[{"type":"message","id":"msg-1","role":"assistant","status":"completed","content":[{"type":"output_text","text":"Hello","annotations":[]}]}],"usage":{"input_tokens":10,"output_tokens":2,"total_tokens":12}}}`)
+	}))
+	defer server.Close()
+	model, err := modelapi.NewModel(config.OpenAI{APIKey: "test-key", Model: "test-model",
+		BaseURL: server.URL, RequestTimeout: time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var deltas []modelapi.StreamDelta
+	completion, err := model.Stream(t.Context(), responses.ResponseNewParams{
+		Model: shared.ResponsesModel("test-model"), Store: openaigo.Bool(false),
+		Input: responses.ResponseNewParamsInputUnion{OfString: openaigo.String("task")},
+	}, "agent:1:model", func(delta modelapi.StreamDelta) error {
+		deltas = append(deltas, delta)
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(deltas, []modelapi.StreamDelta{
+		{Kind: "text", Text: "Hel", ItemID: "msg-1"},
+		{Kind: "text", Text: "lo", ItemID: "msg-1"},
+	}) {
+		t.Fatalf("deltas=%+v", deltas)
+	}
+	if completion.Response.ID != "resp-stream" || completion.Response.OutputText() != "Hello" ||
+		!json.Valid([]byte(completion.Response.RawJSON())) {
+		t.Fatalf("completion=%+v raw=%s", completion, completion.Response.RawJSON())
+	}
+}
+
 func TestSDKDoesNotRetryAndClassifiesFailures(t *testing.T) {
 	for _, test := range []struct {
 		status    int
