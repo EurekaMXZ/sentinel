@@ -7,7 +7,7 @@
 
 ```text
 compose.yaml              本地 PostgreSQL、MinIO、Temporal
-deploy/minio/             MinIO 和 mc 的固定版本源码构建
+deploy/minio/             可选：MinIO 和 mc 的固定版本源码构建备用方案
 docs/DEVELOPMENT.md        中间件配置、初始化及启动说明
 docs/SCHEMA.md             数据表、约束及发布事务约定
 docs/AGENT_RUNTIME.md      Agent 启动、SDK 调用与恢复边界
@@ -62,7 +62,8 @@ docker compose --env-file .env.example run --build --rm minio-init
 
 PostgreSQL、MinIO、Redis 和 Temporal 均使用命名卷持久化。初始化任务创建私有 `sentinel` bucket。
 Temporal UI 为 `http://127.0.0.1:8233`，MinIO Console 为 `http://127.0.0.1:9001`。
-MinIO 使用固定源码版本构建，首次启动需要下载和编译依赖。
+本地 Compose 使用 `pgsty/minio` 的固定 release 镜像（镜像内包含 `mc`），首次启动只需拉取镜像。
+如需从官方源码构建，可使用 `deploy/minio` 中的备用 Dockerfile。
 完整配置、默认凭据、环境变量和停止方式见 [本地开发环境](docs/DEVELOPMENT.md)。
 
 ## 初始化数据库

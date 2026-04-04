@@ -20,7 +20,8 @@ services:
       start_period: 10s
 
   minio:
-    build: ./deploy/minio
+    # Third-party mirror of the official MinIO release; the image includes mc.
+    image: pgsty/minio:RELEASE.2026-08-04T00-00-00Z
     restart: unless-stopped
     command: ["server", "/data", "--console-address", ":9001"]
     environment:
@@ -32,14 +33,14 @@ services:
     volumes:
       - minio-data:/data
     healthcheck:
-      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9000/minio/health/ready"]
+      test: ["CMD", "curl", "-f", "-s", "-o", "/dev/null", "http://127.0.0.1:9000/minio/health/ready"]
       interval: 5s
       timeout: 5s
       retries: 20
       start_period: 10s
 
   minio-init:
-    build: ./deploy/minio
+    image: pgsty/minio:RELEASE.2026-08-04T00-00-00Z
     restart: "no"
     depends_on:
       minio:

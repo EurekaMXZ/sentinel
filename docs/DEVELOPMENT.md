@@ -21,9 +21,10 @@ Temporal 使用官方 CLI 镜像的 `server start-dev`，自动创建 `default` 
 SQLite 数据库保存在命名卷中，容器重建后仍可恢复。这与保存业务元数据的 PostgreSQL 是两套独立存储。
 本配置用于本地开发；生产部署应使用独立的 Temporal 服务或 Temporal Cloud。
 
-MinIO 和 `mc` 从 Dockerfile 中固定的官方源码标签构建，避免依赖已无法拉取的旧预编译镜像。
-首次构建需要访问 GitHub、Go 模块代理和 Alpine 软件源，耗时会比拉取镜像长。
-两项服务共享 Docker 构建缓存，不会修改本机的 `go.mod`、`go.sum` 或 Go 缓存配置。
+MinIO 使用 `pgsty/minio:RELEASE.2026-08-04T00-00-00Z` 镜像；它是官方 MinIO 的第三方镜像，
+同时包含 `mc`，`minio-init` 也复用同一镜像创建 bucket。若该镜像不可用，可使用
+`deploy/minio` 中固定的官方源码 Dockerfile 作为备用方案，但首次构建需要访问 GitHub、
+Go 模块代理和 Alpine 软件源。两种方式都不会修改本机的 `go.mod`、`go.sum` 或 Go 缓存配置。
 
 ## 启动
 
@@ -206,5 +207,6 @@ Go 环境变量；容器内部连接仍使用服务名和原来的容器端口�
 
 - [Temporal CLI 开发服务](https://docs.temporal.io/cli/setup-cli)
 - [Compose 启动顺序和健康检查](https://docs.docker.com/compose/how-tos/startup-order/)
-- [MinIO 固定源码版本](https://github.com/minio/minio/tree/RELEASE.2025-10-15T17-29-55Z)
-- [MinIO Client 固定源码版本](https://github.com/minio/mc/tree/RELEASE.2025-08-13T08-35-41Z)
+- [pgsty/minio 镜像](https://hub.docker.com/r/pgsty/minio)
+- [MinIO 备用源码版本](https://github.com/minio/minio/tree/RELEASE.2025-10-15T17-29-55Z)
+- [MinIO Client 备用源码版本](https://github.com/minio/mc/tree/RELEASE.2025-08-13T08-35-41Z)
