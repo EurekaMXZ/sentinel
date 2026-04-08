@@ -1,0 +1,49 @@
+@import "tailwindcss";
+@import "@heroui/styles";
+
+@theme inline {
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+:root {
+  color-scheme: dark;
+}
+
+html,
+body {
+  min-height: 100%;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+}
+
+::selection {
+  background: color-mix(in oklch, var(--accent) 35%, transparent);
+}
+
+.event-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.stream-cursor::after {
+  content: "▍";
+  margin-left: 1px;
+  animation: cursor-blink 1s steps(2, start) infinite;
+}
+
+@keyframes cursor-blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+/* Keep long IDs and JSON readable without forcing a horizontal scrollbar
+   across the whole page. */
+.break-anywhere {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}

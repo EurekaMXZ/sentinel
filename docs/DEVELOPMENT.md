@@ -178,6 +178,24 @@ API 的 `/healthz` 仅表示 HTTP 进程存活。`/v1` 控制 API 已提供 Agen
 | `S3_ENDPOINT` | `minio:9000` |
 | `TEMPORAL_ADDRESS` | `temporal:7233` |
 
+## Web 前端
+
+`web/` 使用 Next.js 16、React 19、HeroUI v3 和 Tailwind CSS v4，包管理器为 pnpm。
+API、Agent Worker 和 Source Worker 启动后：
+
+```powershell
+cd web
+corepack enable pnpm
+pnpm install
+Copy-Item .env.example .env.local
+pnpm dev
+```
+
+打开 `http://localhost:3000`。Next 将同源 `/v1/*` 代理到 `SENTINEL_API_URL`（默认
+`http://127.0.0.1:8080`），因此不需要为浏览器配置 CORS。`NEXT_PUBLIC_TENANT_ID`
+是当前控制台使用的租户 UUID。页面行为、SSE 回放和已知边界见
+[web/README.md](../web/README.md)。
+
 ## 检查和停止
 
 ```powershell

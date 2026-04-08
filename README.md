@@ -13,6 +13,7 @@ docs/SCHEMA.md             数据表、约束及发布事务约定
 docs/AGENT_RUNTIME.md      Agent 启动、SDK 调用与恢复边界
 docs/API.md                控制 API 的请求、响应和状态码
 docs/SOURCE_SYNC.md        GitHub 仓库导入、增量同步及恢复
+web/                      Next.js + React + HeroUI 控制台前端
 cmd/
   api/                    Gin HTTP API 入口
   agent/                  创建、等待或重新连接根 Agent 的 CLI
@@ -119,6 +120,25 @@ $env:GIN_MODE = "release"
 go run ./cmd/api
 ```
 
+## Web 前端
+
+`web/` 是 Next.js 16 + React 19 + HeroUI v3 前端，提供新建分析和任务事件日志两个页面。
+它通过同源 `/v1` 代理访问控制 API，SSE 首次加载完整回放，断线按 `last_event_id` 续传。
+
+```powershell
+cd web
+corepack enable pnpm
+pnpm install
+Copy-Item .env.example .env.local
+pnpm dev
+```
+
+默认访问 `http://localhost:3000`。需要先启动 API、Agent Worker 和 Source Worker。
+`SENTINEL_API_URL` 指向后端，`NEXT_PUBLIC_TENANT_ID` 指定当前租户。
+完整说明见 [web/README.md](web/README.md)。
+
+事件日志依赖 Redis Stream；超过 `REDIS_STREAM_TTL` 后仍可读取最终结果，但历史事件不可回放。
+
 ## Worker 入口
 
 先准备可访问的 Temporal Server，再分别启动需要的进程：
@@ -171,7 +191,7 @@ CLI 输出仓库、同步和 Workflow ID；`-wait` 等待归档发布并输出�
 当前工具集提供 `call_child_agent` 和 `source_list_versions`、`source_list_files`、`source_read_file`、
 `source_search`、`source_diff` 五个只读源码工具。源码工具在 Agent Worker 校验资源范围后，
 通过 Temporal 派发到 Source Worker 执行，完整结果保存在对象存储，Context 只携带受限摘录和结果引用。
-GitHub 同步、增量归档和自动 Context compact 已实现；outbox 消费和业务 API 尚未实现。
+GitHub 同步、增量归档、自动 Context compact、控制 API 和 Web 前端已实现；outbox 消费尚未实现。
 资源绑定不会自动读取资源正文。创建 SDK 客户端不会发起模型请求。
 
 ## 开发检查

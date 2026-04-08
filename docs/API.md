@@ -19,7 +19,7 @@ API 需要 PostgreSQL、MinIO/S3、Temporal 和 `OPENAI_MODEL`。SSE 还需要 R
 ```
 
 - `/healthz` 只表示 HTTP 进程存活。
-- 未实现认证、资源上传、事件/Context 查询、outbox 投递和 Web UI。
+- 未实现认证、资源上传、事件/Context 查询和 outbox 投递。仓库内的 `web/` 提供基于本 API 的控制台前端。
 
 ## Agent
 
