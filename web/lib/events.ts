@@ -135,7 +135,38 @@ export function buildTimeline(events: AgentEvent[]): TimelineEntry[] {
         step.items.push(newAttempt(event, attempt));
         break;
       }
+      case "model.text": {
+        const step = ensureStep(stepId);
+        const attempt = event.attempt ?? 0;
+        let item = findAttempt(step, attempt);
+        if (!item) {
+          item = newAttempt(event, attempt);
+          step.items.push(item);
+        }
+        step.startedAt ??= event.created_at;
+        item.text += eventDataString(event, "text") ?? "";
+        const itemID = eventDataString(event, "item_id");
+        if (itemID) item.itemId = itemID;
+        break;
+      }
+      case "model.arguments": {
+        const step = ensureStep(stepId);
+        const attempt = event.attempt ?? 0;
+        let item = findAttempt(step, attempt);
+        if (!item) {
+          item = newAttempt(event, attempt);
+          step.items.push(item);
+        }
+        const argumentsText = eventDataString(event, "arguments") ?? "";
+        if (argumentsText) {
+          item.argumentsText += (item.argumentsText ? "\n\n" : "") + argumentsText;
+        }
+        const itemID = eventDataString(event, "item_id");
+        if (itemID) item.itemId = itemID;
+        break;
+      }
       case "model.delta": {
+        // Legacy events from streams produced before paragraph batching.
         const step = ensureStep(stepId);
         const attempt = event.attempt ?? 0;
         let item = findAttempt(step, attempt);
@@ -233,6 +264,8 @@ export function buildTimeline(events: AgentEvent[]): TimelineEntry[] {
 
 const MODEL_TYPES = new Set([
   "model.started",
+  "model.text",
+  "model.arguments",
   "model.delta",
   "model.completed",
   "model.failed",
@@ -278,6 +311,14 @@ export function eventSummary(event: AgentEvent): string {
     }
     case "model.started":
       return event.attempt ? `attempt ${event.attempt}` : "";
+    case "model.text": {
+      const text = eventDataString(event, "text") ?? "";
+      return text.length > 80 ? `${text.slice(0, 80)}…` : text;
+    }
+    case "model.arguments": {
+      const argumentsText = eventDataString(event, "arguments") ?? "";
+      return `arguments · ${argumentsText.length} chars`;
+    }
     case "model.delta": {
       const kind = eventDataString(event, "kind") ?? "text";
       const text = eventDataString(event, "text") ?? "";

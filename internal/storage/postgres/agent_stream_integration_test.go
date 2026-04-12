@@ -85,15 +85,17 @@ func TestModelStepStreamsDeltasAndPersistsFinalResponse(t *testing.T) {
 	seen := make(map[string]bool)
 	for _, event := range publisher.snapshot() {
 		seen[event.Type] = true
-		if event.Type == stream.EventModelDelta {
-			var delta modelapi.StreamDelta
-			if err := json.Unmarshal(event.Data, &delta); err != nil {
+		if event.Type == stream.EventModelText {
+			var text struct {
+				Text string `json:"text"`
+			}
+			if err := json.Unmarshal(event.Data, &text); err != nil {
 				t.Fatal(err)
 			}
-			deltaText += delta.Text
+			deltaText += text.Text
 		}
 	}
-	for _, eventType := range []string{stream.EventModelStarted, stream.EventModelDelta,
+	for _, eventType := range []string{stream.EventModelStarted, stream.EventModelText,
 		stream.EventModelCompleted, stream.EventAgentCompleted} {
 		if !seen[eventType] {
 			t.Fatalf("missing stream event %q: %+v", eventType, publisher.snapshot())

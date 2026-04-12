@@ -138,15 +138,22 @@ Last-Event-ID: 1729490000000-0
 
 ```text
 id: 1729490000000-0
-event: model.delta
-data: {"type":"model.delta","step_id":1,"attempt":1,"data":{"kind":"text","text":"Hello"},"created_at":"2026-10-21T..."}
+event: model.text
+data: {"type":"model.text","step_id":1,"attempt":1,"data":{"kind":"text","text":"完整的 Markdown 段落\n\n"},"created_at":"2026-10-21T..."}
 ```
 
 - `id` 是 Redis Stream ID，作为 SSE 重连游标；`event` 与 JSON 中的 `type` 相同。
-- 事件类型：`agent.status`、`step.completed`、`model.started`、`model.delta`、
-  `model.completed`、`model.failed`、`tool.started`、`tool.completed`、
-  `context.compacted`、`agent.completed`、`agent.failed`、`agent.cancelled`。
-- `model.delta` 的 `data.kind` 为 `text` 或 `arguments`；推理内容和加密推理上下文不会下发。
+- 事件类型：`agent.status`、`step.completed`、`model.started`、`model.text`、
+  `model.arguments`、`model.completed`、`model.failed`、`tool.started`、
+  `tool.completed`、`context.compacted`、`agent.completed`、`agent.failed`、
+  `agent.cancelled`。
+- `model.text` 每次携带一个完整的 Markdown 段落。Agent Worker 在内部消费上游
+  `response.output_text.delta`，按空行聚合（围栏代码块内部不拆分），不向前端转发
+  token 级 delta；结束时刷新最后一段。这样前端可以按段落渲染，并用流式 Markdown
+  组件安全处理不完整 Markdown。
+- `model.arguments` 在模型调用完成时携带完整的 function call 参数 JSON，不再逐段下发。
+- 旧版本产生的流中可能仍包含 `model.delta`；新客户端可以忽略。推理内容和加密推理
+  上下文始终不下发。
 - 收到 `agent.completed`、`agent.failed` 或 `agent.cancelled` 后连接自动关闭。
 - 历史保留时间由 `REDIS_STREAM_TTL` 控制（默认 168 小时）。过期后仍可通过
   `GET /v1/agents/{agent_id}/result` 读取最终结果。

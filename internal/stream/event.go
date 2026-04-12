@@ -13,9 +13,15 @@ import (
 )
 
 const (
-	EventAgentStatus      = "agent.status"
-	EventStepCompleted    = "step.completed"
-	EventModelStarted     = "model.started"
+	EventAgentStatus   = "agent.status"
+	EventStepCompleted = "step.completed"
+	EventModelStarted  = "model.started"
+	// EventModelText carries a complete Markdown paragraph. New publishers do
+	// not emit token deltas.
+	EventModelText      = "model.text"
+	EventModelArguments = "model.arguments"
+	// EventModelDelta is retained for replaying streams produced before the
+	// paragraph batching change. New publishers must not emit it.
 	EventModelDelta       = "model.delta"
 	EventModelCompleted   = "model.completed"
 	EventModelFailed      = "model.failed"

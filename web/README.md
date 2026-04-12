@@ -54,7 +54,8 @@ NEXT_PUBLIC_TENANT_ID=0194e229-8576-7f42-8f08-3496913847cf
 ### 事件日志
 
 - 通过 `fetch` + `ReadableStream` 解析 SSE；首次加载完整回放，断线使用 `last_event_id` 增量续传
-- 按 `step_id` 聚合模型输出和工具调用；`model.delta` 合并渲染，避免逐条更新
+- 按 `step_id` 聚合模型输出和工具调用；`model.text` 是完整 Markdown 段落，由 Streamdown 渲染，不再逐 token 更新
+- `model.arguments` 在模型完成时携带完整工具参数；旧历史中的 `model.delta` 仍兼容
 - 「时间线」和「原始事件」双视图，支持类型筛选、搜索、导出 JSONL
 - 收到终态事件后关闭流并读取 `GET /v1/agents/{id}/result`
 - Redis 不可用时降级为轮询；事件超过 `REDIS_STREAM_TTL` 时提示历史已过期

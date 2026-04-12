@@ -37,7 +37,7 @@ func (f *fakeStreamReader) Subscribe(context.Context, string, string) (<-chan st
 
 func streamMessages(t *testing.T) []stream.Message {
 	t.Helper()
-	first := stream.Event{Type: stream.EventModelDelta, Data: json.RawMessage(`{"kind":"text","text":"hello"}`)}
+	first := stream.Event{Type: stream.EventModelText, Data: json.RawMessage(`{"kind":"text","text":"hello"}`)}
 	second := stream.Event{Type: stream.EventAgentCompleted, Data: json.RawMessage(`{"result_ref":"result"}`)}
 	firstPayload, err := json.Marshal(first)
 	if err != nil {
@@ -66,7 +66,7 @@ func TestAgentStreamReplaysHistoryAndCloses(t *testing.T) {
 		t.Fatalf("unexpected content type %q", contentType)
 	}
 	body := response.Body.String()
-	for _, expected := range []string{"retry: 3000", "id: 1-1", "event: model.delta", `"text":"hello"`,
+	for _, expected := range []string{"retry: 3000", "id: 1-1", "event: model.text", `"text":"hello"`,
 		"id: 1-2", "event: agent.completed", `"result_ref":"result"`} {
 		if !strings.Contains(body, expected) {
 			t.Fatalf("stream body is missing %q:\n%s", expected, body)
@@ -108,7 +108,7 @@ func TestAgentStreamAcceptsTenantQuery(t *testing.T) {
 		"/v1/agents/"+testAgent+"/stream?tenant_id="+testTenant, nil)
 	response := httptest.NewRecorder()
 	router.ServeHTTP(response, request)
-	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "event: model.delta") {
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "event: model.text") {
 		t.Fatalf("query tenant stream status=%d body=%s", response.Code, response.Body.String())
 	}
 }

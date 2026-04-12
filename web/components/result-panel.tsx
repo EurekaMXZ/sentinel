@@ -1,15 +1,13 @@
 "use client";
 
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 import {
   Alert,
   Button,
   Card,
   Chip,
   Skeleton,
-  Typography,
 } from "@heroui/react";
+import { Streamdown } from "streamdown";
 
 import { isAgentTerminal, statusLabel } from "@/lib/format";
 import type { AgentResult } from "@/lib/types";
@@ -70,9 +68,13 @@ export function ResultPanel({
         ) : result ? (
           <>
             {result.summary ? (
-              <Typography.Prose className="max-w-none text-sm leading-6 text-foreground/85">
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>{result.summary}</ReactMarkdown>
-              </Typography.Prose>
+              <Streamdown
+                mode="static"
+                animated={false}
+                className="streamdown max-w-none text-sm leading-6 text-foreground/85"
+              >
+                {result.summary}
+              </Streamdown>
             ) : (
               <p className="text-xs text-muted">Agent 没有返回文字摘要。</p>
             )}

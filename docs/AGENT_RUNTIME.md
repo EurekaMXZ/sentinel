@@ -150,12 +150,15 @@ Worker 正常退出或暂时不可用时，Temporal 保留历史并在 Worker �
 ## 流式事件
 
 Agent Worker 配置 `REDIS_ADDR` 后，模型 Activity 使用官方 SDK 的 `Responses.NewStreaming` 读取上游
-流式响应，并把文本增量和 function call 参数增量发布为 `model.delta`。最终 `response.completed`
-响应仍按原路径保存到 S3，Context、检查点和重试语义不变；Redis 发布失败只记录告警，不阻断模型调用。
+流式响应。上游 delta 只在 Worker 内用于聚合：文本按空行（围栏代码块内部除外）形成完整
+Markdown 段落后发布为 `model.text`，function call 参数在完成时发布一次
+`model.arguments`。SSE 不再携带 token 级 `model.delta`，前端按段落渲染。
+最终 `response.completed` 响应仍按原路径保存到 S3，Context、检查点和重试语义不变；
+Redis 发布失败只记录告警，不阻断模型调用。
 
 同时发布的生命周期事件包括 `agent.status`、`step.completed`、`model.started`、`model.completed`、
 `model.failed`、`tool.started`、`tool.completed`、`context.compacted` 和终态事件。
-推理内容和加密推理上下文不下发。
+推理内容和加密推理上下文不下发。旧流中可能仍存在 `model.delta`，仅为回放兼容保留。
 
 每个事件通过 `XADD` 写入按租户 / Agent 分离的 Redis Stream，并 `PUBLISH` 到对应 Pub/Sub 频道。
 Stream 是完整历史，TTL 由 `REDIS_STREAM_TTL` 控制；Pub/Sub 只负责实时投递。SSE 接口先订阅，

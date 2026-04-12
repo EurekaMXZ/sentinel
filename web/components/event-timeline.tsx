@@ -2,6 +2,7 @@
 
 import { useMemo } from "react";
 import { Card, Chip, EmptyState, Spinner } from "@heroui/react";
+import { Streamdown } from "streamdown";
 
 import {
   buildTimeline,
@@ -38,14 +39,14 @@ function ModelBlock({ item }: { item: ModelAttemptItem }) {
       </div>
 
       {item.text ? (
-        <pre
-          className={[
-            "event-text font-sans text-sm leading-6 text-foreground/90",
-            streaming ? "stream-cursor" : "",
-          ].join(" ")}
+        <Streamdown
+          mode={streaming ? "streaming" : "static"}
+          parseIncompleteMarkdown
+          animated={false}
+          className="streamdown text-sm leading-6 text-foreground/90"
         >
           {item.text}
-        </pre>
+        </Streamdown>
       ) : (
         <p className="text-xs text-muted">
           {streaming ? "等待模型输出…" : "本步骤没有文字输出。"}

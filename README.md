@@ -184,7 +184,7 @@ CLI 输出仓库、同步和 Workflow ID；`-wait` 等待归档发布并输出�
 - Agent 和子 Agent 各自选择零到多个仓库、快照或文档资源，运行不要求绑定源码。
 - 模型通过明确的快照 ID 查看目录、文件、搜索及 diff；每次源码调用保存实际版本以便重试和核对证据。
 - Workflow 只传递状态和引用，源码正文、模型 I/O 与大工具结果保存在对象存储。
-- 配置 Redis 后，模型流式增量通过 Pub/Sub 实时推送，并写入 Redis Streams 供 SSE 回放。
+- 配置 Redis 后，模型输出按完整 Markdown 段落通过 Pub/Sub 推送，并写入 Redis Streams 供 SSE 回放。
 
 模型请求通过已有的官方 `openai-go/v3` SDK 发往 Responses API。请求、原始响应、工具结果和 Context
 保存在 S3，PostgreSQL 保存引用、幂等状态、租约、检查点及 outbox。Temporal History 只携带引用和游标。
