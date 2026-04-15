@@ -159,6 +159,8 @@ go run ./cmd/relay-worker
 每个终端需要各自设置所需环境变量。Agent Worker 已接入 PG、S3 和官方 OpenAI SDK，
 注册通用 Agent Workflow 和模型、工具、检查点、compact 等 Activity。Source Worker 已接入原生 Git、PG 和 S3，
 注册源码同步、失败清理和只读源码查询 Activity；它需要安装 Git，并可通过 `GIT_BINARY` 指定可执行文件。
+Source Worker 会忽略全局 / 系统 Git 配置；如果访问 GitHub 需要代理，须在启动它的终端设置
+`HTTPS_PROXY`（必要时设置 `NO_PROXY`），而不是只配置 `~/.gitconfig`。
 Agent 与 Source Worker 必须使用相同的 `TEMPORAL_SOURCE_TASK_QUEUE`，源码工具请求会派发到该队列。
 Relay Worker 仍只验证 Temporal 连接并等待退出。
 API 的 `/healthz` 仅表示 HTTP 进程存活。`/v1` 控制 API 已提供 Agent 与源码同步的管理入口，

@@ -3,7 +3,7 @@
 Sentinel 的 Next.js 前端。当前提供两个页面：
 
 - `/`：输入 GitHub 仓库地址，完成「注册仓库 → 同步源码 → 选择最新就绪快照 → 创建 Agent」
-- `/tasks/[agentId]`：查看某个分析任务的完整事件日志，支持 SSE 回放、实时追加、原始事件表、取消/恢复和最终结果
+- `/tasks/[agentId]`：查看某个分析任务的完整事件日志，支持 SSE 回放、实时追加、时间线筛选和取消/恢复
 
 ## 技术栈
 
@@ -53,11 +53,12 @@ NEXT_PUBLIC_TENANT_ID=0194e229-8576-7f42-8f08-3496913847cf
 
 ### 事件日志
 
+- SSE 走 `app/stream/agents/[agentId]/route.ts` 专用 Route Handler，直接转发上游 `ReadableStream`；它故意不放在 `/v1` 下，避免被 `/v1/*` rewrite 拦截并缓冲。浏览器请求 `/stream/agents/{id}`。
 - 通过 `fetch` + `ReadableStream` 解析 SSE；首次加载完整回放，断线使用 `last_event_id` 增量续传
-- 按 `step_id` 聚合模型输出和工具调用；`model.text` 是完整 Markdown 段落，由 Streamdown 渲染，不再逐 token 更新
+- 按 `step_id` 聚合模型输出和工具调用；`model.text` 在模型文本完成时发送一次最终 Markdown，由 Streamdown 渲染，不再逐 token 更新
 - `model.arguments` 在模型完成时携带完整工具参数；旧历史中的 `model.delta` 仍兼容
-- 「时间线」和「原始事件」双视图，支持类型筛选、搜索、导出 JSONL
-- 收到终态事件后关闭流并读取 `GET /v1/agents/{id}/result`
+- 事件时间线，支持类型筛选、搜索和导出 JSONL
+- 收到终态事件后关闭流；最终结果仍可通过 `GET /v1/agents/{id}/result` 读取，当前页面不展示结果面板
 - Redis 不可用时降级为轮询；事件超过 `REDIS_STREAM_TTL` 时提示历史已过期
 
 ## 检查
@@ -72,5 +73,5 @@ pnpm typecheck
 
 - 当前没有认证、租户管理或私有仓库凭据输入
 - 只展示根 Agent 的事件，子 Agent 事件流尚未聚合
-- 事件历史依赖 Redis Stream，超过 TTL 后只能查看最终结果
+- 事件历史依赖 Redis Stream，超过 TTL 后只能通过 API 读取最终结果
 - 工具事件只包含工具名与状态，参数和结果正文仍在对象存储中

@@ -59,7 +59,7 @@ func TestModelStepStreamsDeltasAndPersistsFinalResponse(t *testing.T) {
 			flusher.Flush()
 		}
 		write(`{"type":"response.created","response":{"id":"resp-stream","object":"response","status":"in_progress","output":[]}}`)
-		write(`{"type":"response.output_text.delta","delta":"streamed","item_id":"msg-1","output_index":0,"content_index":0}`)
+		write(`{"type":"response.output_text.done","text":"streamed","item_id":"msg-1","output_index":0,"content_index":0,"sequence_number":3,"logprobs":[]}`)
 		write(`{"type":"response.completed","response":{"id":"resp-stream","object":"response","status":"completed","output":[{"type":"message","id":"msg-1","role":"assistant","status":"completed","content":[{"type":"output_text","text":"streamed answer","annotations":[]}]}],"usage":{"input_tokens":10,"output_tokens":2,"total_tokens":12}}}`)
 	}))
 	t.Cleanup(server.Close)

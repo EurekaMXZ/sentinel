@@ -169,7 +169,7 @@ export function useAgentStream(
           params.set("last_event_id", lastIdRef.current);
         }
         const response = await fetch(
-          `/v1/agents/${encodeURIComponent(agentId)}/stream?${params.toString()}`,
+          `/stream/agents/${encodeURIComponent(agentId)}?${params.toString()}`,
           {
             headers: {
               Accept: "text/event-stream",

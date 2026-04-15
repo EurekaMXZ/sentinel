@@ -134,6 +134,8 @@ Last-Event-ID: 1729490000000-0
 - 返回 `text/event-stream`。首次连接从 Redis Stream 回放完整历史；浏览器自动携带
   `Last-Event-ID` 时只回放该 ID 之后的事件，也支持 `?last_event_id=` 查询参数。
 - 回放期间先订阅 Pub/Sub，再读取 Stream 历史，最后按 Stream ID 去重转发实时消息。
+- SSE 处理器会清除该响应的 HTTP 写超时；否则服务端 `HTTP_WRITE_TIMEOUT`（默认 30 秒）
+  会周期性断开长连接。其他 JSON 接口仍受该超时保护。
 - 每条事件：
 
 ```text
@@ -147,10 +149,10 @@ data: {"type":"model.text","step_id":1,"attempt":1,"data":{"kind":"text","text":
   `model.arguments`、`model.completed`、`model.failed`、`tool.started`、
   `tool.completed`、`context.compacted`、`agent.completed`、`agent.failed`、
   `agent.cancelled`。
-- `model.text` 每次携带一个完整的 Markdown 段落。Agent Worker 在内部消费上游
-  `response.output_text.delta`，按空行聚合（围栏代码块内部不拆分），不向前端转发
-  token 级 delta；结束时刷新最后一段。这样前端可以按段落渲染，并用流式 Markdown
-  组件安全处理不完整 Markdown。
+- `model.text` 携带最终文本，在 Agent Worker 收到上游 `response.output_text.done`
+  时发送一次。token 级 `response.output_text.delta` 不再转发。若兼容服务没有发送
+  `output_text.done`，Worker 会从 `response.completed` 的最终 output 中补发一次完整文本。
+  前端使用 Markdown 组件渲染该最终文本。
 - `model.arguments` 在模型调用完成时携带完整的 function call 参数 JSON，不再逐段下发。
 - 旧版本产生的流中可能仍包含 `model.delta`；新客户端可以忽略。推理内容和加密推理
   上下文始终不下发。

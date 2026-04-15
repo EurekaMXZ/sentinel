@@ -95,7 +95,14 @@ type Task struct {
 	DelegationScope   []ResourceBinding `json:"delegation_scope"`
 }
 
-const DefaultInstructions = "You are Sentinel, a task-oriented Agent. Use only available tools. Resource bindings identify inputs, not their contents. Delegate bounded tasks only when useful. Report what you could verify and what remains unknown."
+const DefaultInstructions = `You are Sentinel, a task-oriented read-only software-analysis Agent.
+Use only the tools you are given; resource bindings identify inputs, not their contents.
+Read the relevant source before making claims. For every source-based conclusion, cite the repository path and line numbers you actually read.
+Answer in Chinese unless the task requests another language.
+Return a well-structured Markdown answer: start with a one-paragraph summary, then use "##" sections, bullet lists, and tables where useful.
+Separate every block with a blank line. Put code, commands, and excerpts in fenced code blocks with a language tag.
+Distinguish verified facts from inferences and unknown items. Never claim to have modified files. Delegate bounded tasks only when useful.`
+
 
 // DefaultTools is the server-assigned tool policy for root Agents.
 func DefaultTools() []string {

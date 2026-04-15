@@ -54,6 +54,15 @@ func streamAgent(deps Dependencies, logger *slog.Logger) gin.HandlerFunc {
 		}
 		defer cancel()
 
+		// http.Server.WriteTimeout is meant for bounded JSON responses. It is an
+		// absolute deadline, so it would close every SSE connection after the
+		// configured duration even while heartbeats are being sent. Clear it for
+		// this response only; the handler still stops on client cancellation,
+		// terminal events, or server shutdown.
+		if err := http.NewResponseController(c.Writer).SetWriteDeadline(time.Time{}); err != nil {
+			logger.WarnContext(c.Request.Context(), "failed to clear SSE write deadline", "agent_id", id, "error", err)
+		}
+
 		c.Header("Content-Type", "text/event-stream")
 		c.Header("Cache-Control", "no-cache")
 		c.Header("Connection", "keep-alive")

@@ -77,7 +77,7 @@ func TestOfficialSDKRequestAndReasoningRoundTrip(t *testing.T) {
 	}
 }
 
-func TestStreamingForwardsDeltasAndReturnsFinalResponse(t *testing.T) {
+func TestStreamingForwardsFinalTextAndReturnsFinalResponse(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var body map[string]any
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -96,8 +96,7 @@ func TestStreamingForwardsDeltasAndReturnsFinalResponse(t *testing.T) {
 			flusher.Flush()
 		}
 		write(`{"type":"response.created","response":{"id":"resp-stream","object":"response","status":"in_progress","output":[]}}`)
-		write(`{"type":"response.output_text.delta","delta":"Hel","item_id":"msg-1","output_index":0,"content_index":0}`)
-		write(`{"type":"response.output_text.delta","delta":"lo","item_id":"msg-1","output_index":0,"content_index":0}`)
+		write(`{"type":"response.output_text.done","text":"Hello","item_id":"msg-1","output_index":0,"content_index":0,"sequence_number":3,"logprobs":[]}`)
 		write(`{"type":"response.completed","response":{"id":"resp-stream","object":"response","status":"completed","output":[{"type":"message","id":"msg-1","role":"assistant","status":"completed","content":[{"type":"output_text","text":"Hello","annotations":[]}]}],"usage":{"input_tokens":10,"output_tokens":2,"total_tokens":12}}}`)
 	}))
 	defer server.Close()
@@ -118,8 +117,7 @@ func TestStreamingForwardsDeltasAndReturnsFinalResponse(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !reflect.DeepEqual(deltas, []modelapi.StreamDelta{
-		{Kind: "text", Text: "Hel", ItemID: "msg-1"},
-		{Kind: "text", Text: "lo", ItemID: "msg-1"},
+		{Kind: "text_done", Text: "Hello", ItemID: "msg-1"},
 	}) {
 		t.Fatalf("deltas=%+v", deltas)
 	}

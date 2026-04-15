@@ -33,6 +33,13 @@ $env:SOURCE_MAX_BUNDLE_BYTES = "536870912"
 go run ./cmd/source-worker
 ```
 
+Source Worker 会清空继承的 Git 系统 / 全局配置（`GIT_CONFIG_NOSYSTEM=1`、
+`GIT_CONFIG_GLOBAL=/dev/null`），避免全局 URL 重写或凭据注入影响拉取。因此，
+`~/.gitconfig` 里的 `http.proxy` 不会自动生效。如果访问 GitHub 需要代理，请在启动
+Source Worker 的终端设置 `HTTPS_PROXY`（必要时同时设置 `NO_PROXY`），不要依赖
+全局 Git 配置。代理不可达时，`git ls-remote` 会以状态 128 失败，同步 Activity 会按
+Temporal 重试策略持续重试，界面上的任务会一直显示 `running`。
+
 在另一个已配置的终端导入仓库：
 
 ```powershell

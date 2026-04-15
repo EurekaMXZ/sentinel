@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
-	"sort"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -119,8 +118,6 @@ func (a *Activities) send(ctx context.Context, task agent.Task, step agent.StepR
 	var completion modelapi.Completion
 	var callErr error
 	var publishDisabled atomic.Bool
-	var textBuffers map[string]*paragraphBuffer
-	var argumentBuffers map[string]*strings.Builder
 	if a.Streams != nil {
 		started, err := stream.NewEvent(stream.EventModelStarted, step.Input.StepID, step.FencingToken,
 			map[string]string{"model": task.Model})
@@ -129,41 +126,15 @@ func (a *Activities) send(ctx context.Context, task agent.Task, step agent.StepR
 				publishDisabled.Store(true)
 			}
 		}
-		textBuffers = make(map[string]*paragraphBuffer)
-		argumentBuffers = make(map[string]*strings.Builder)
 		completion, callErr = a.Model.Stream(requestCtx, request, step.OperationID, func(delta modelapi.StreamDelta) error {
 			switch delta.Kind {
-			case "text":
-				buffer := textBuffers[delta.ItemID]
-				if buffer == nil {
-					buffer = &paragraphBuffer{}
-					textBuffers[delta.ItemID] = buffer
-				}
-				for _, chunk := range buffer.Write(delta.Text) {
-					a.publishModelText(requestCtx, step, &publishDisabled, delta.ItemID, chunk)
-				}
-			case "arguments":
-				buffer := argumentBuffers[delta.ItemID]
-				if buffer == nil {
-					buffer = &strings.Builder{}
-					argumentBuffers[delta.ItemID] = buffer
-				}
-				buffer.WriteString(delta.Text)
+			case "text_done":
+				a.publishModelText(requestCtx, step, &publishDisabled, delta.ItemID, delta.Text)
+			case "arguments_done":
+				a.publishModelArguments(requestCtx, step, &publishDisabled, delta.ItemID, delta.Text)
 			}
 			return nil
 		})
-		// Flush the final partial paragraph and publish complete argument
-		// documents before model.completed. This also preserves partial text when
-		// the upstream stream fails.
-		for _, itemID := range sortedKeys(textBuffers) {
-			for _, chunk := range textBuffers[itemID].Flush() {
-				a.publishModelText(requestCtx, step, &publishDisabled, itemID, chunk)
-			}
-		}
-		for _, itemID := range sortedKeys(argumentBuffers) {
-			a.publishModelArguments(requestCtx, step, &publishDisabled, itemID,
-				argumentBuffers[itemID].String())
-		}
 	} else {
 		completion, callErr = a.Model.Complete(requestCtx, request, step.OperationID)
 	}
@@ -266,15 +237,6 @@ func (a *Activities) publishModelArguments(ctx context.Context, step agent.StepR
 	if err := a.publishStreamEvent(ctx, step, event); err != nil {
 		disabled.Store(true)
 	}
-}
-
-func sortedKeys[T any](values map[string]T) []string {
-	keys := make([]string, 0, len(values))
-	for key := range values {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	return keys
 }
 
 func (a *Activities) buildRequest(ctx context.Context, record agent.AgentRecord, task agent.Task) (responses.ResponseNewParams, error) {

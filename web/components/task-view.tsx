@@ -5,7 +5,6 @@ import Link from "next/link";
 import {
   Alert,
   Button,
-  Card,
   Input,
   ListBox,
   Modal,
@@ -13,20 +12,17 @@ import {
   Skeleton,
   Spinner,
   Switch,
-  Tabs,
 } from "@heroui/react";
 
-import { api, ApiError } from "@/lib/api";
+import { api } from "@/lib/api";
 import { shortId } from "@/lib/config";
 import { eventDataString, filterEvents, type EventFilter } from "@/lib/events";
 import { formatDuration, isAgentTerminal } from "@/lib/format";
-import type { AgentResult, AgentView } from "@/lib/types";
+import type { AgentView } from "@/lib/types";
 import { useAgentStream } from "@/lib/use-agent-stream";
 import { AgentMeta } from "./agent-meta";
 import { ConnectionBadge } from "./connection-badge";
 import { EventTimeline } from "./event-timeline";
-import { RawEventTable } from "./raw-event-table";
-import { ResultPanel } from "./result-panel";
 import { StatusChip } from "./status-chip";
 
 type Notice = {
@@ -71,52 +67,20 @@ export function TaskView({ agentId }: { agentId: string }) {
   const [agent, setAgent] = useState<AgentView | null>(null);
   const [agentLoading, setAgentLoading] = useState(true);
   const [agentError, setAgentError] = useState<string | null>(null);
-  const [result, setResult] = useState<AgentResult | null>(null);
-  const [resultLoading, setResultLoading] = useState(false);
-  const [resultError, setResultError] = useState<string | null>(null);
-  const [view, setView] = useState<"timeline" | "raw">("timeline");
   const [filter, setFilter] = useState<EventFilter>("all");
   const [query, setQuery] = useState("");
   const [follow, setFollow] = useState(true);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [busy, setBusy] = useState(false);
   const [resumeRequested, setResumeRequested] = useState(false);
-  const scrollRef = useRef<HTMLDivElement | null>(null);
-  const resultLoadedRef = useRef(false);
-  const resultRequestRef = useRef(false);
+  const timelineEndRef = useRef<HTMLDivElement | null>(null);
   const [cancelOpen, setCancelOpen] = useState(false);
-
-  const loadResult = useCallback(
-    async (force = false) => {
-      if (resultLoadedRef.current && !force) return;
-      if (resultRequestRef.current) return;
-      resultRequestRef.current = true;
-      setResultLoading(true);
-      setResultError(null);
-      try {
-        const next = await api.getAgentResult(agentId);
-        setResult(next);
-        resultLoadedRef.current = true;
-      } catch (caught) {
-        if (caught instanceof ApiError && caught.code === "agent_not_finished") {
-          setResult(null);
-        } else {
-          setResultError(caught instanceof Error ? caught.message : "读取结果失败");
-        }
-      } finally {
-        resultRequestRef.current = false;
-        setResultLoading(false);
-      }
-    },
-    [agentId],
-  );
 
   const loadAgent = useCallback(async () => {
     try {
       const next = await api.getAgent(agentId);
       setAgent(next);
       setAgentError(null);
-      if (isAgentTerminal(next.status)) void loadResult();
       return next;
     } catch (caught) {
       setAgentError(caught instanceof Error ? caught.message : "加载任务失败");
@@ -124,34 +88,26 @@ export function TaskView({ agentId }: { agentId: string }) {
     } finally {
       setAgentLoading(false);
     }
-  }, [agentId, loadResult]);
+  }, [agentId]);
 
   const checkTerminal = useCallback(async () => {
     try {
       const next = await api.getAgent(agentId);
       setAgent(next);
-      if (isAgentTerminal(next.status)) void loadResult();
       return isAgentTerminal(next.status);
     } catch {
       return false;
     }
-  }, [agentId, loadResult]);
+  }, [agentId]);
 
   const handleTerminal = useCallback(() => {
-    void loadResult(true);
     void loadAgent();
-  }, [loadAgent, loadResult]);
+  }, [loadAgent]);
 
   const stream = useAgentStream(agentId, {
     checkTerminal,
     onTerminal: handleTerminal,
   });
-
-  useEffect(() => {
-    resultLoadedRef.current = false;
-    setResult(null);
-    setResultError(null);
-  }, [agentId]);
 
   useEffect(() => {
     void loadAgent();
@@ -175,10 +131,22 @@ export function TaskView({ agentId }: { agentId: string }) {
   }, [notice]);
 
   useEffect(() => {
-    if (view !== "timeline" || !follow) return;
-    const element = scrollRef.current;
-    if (element) element.scrollTop = element.scrollHeight;
-  }, [stream.events.length, follow, view]);
+    if (!follow) return;
+    const frame = window.requestAnimationFrame(() => {
+      timelineEndRef.current?.scrollIntoView({ block: "end", behavior: "auto" });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [stream.events.length, follow]);
+
+  useEffect(() => {
+    function onScroll() {
+      const nearBottom =
+        window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 120;
+      setFollow((current) => (current === nearBottom ? current : nearBottom));
+    }
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
 
   const terminalStatus = useMemo(() => {
     if (!stream.terminal) return undefined;
@@ -275,8 +243,7 @@ export function TaskView({ agentId }: { agentId: string }) {
 
   function scrollToBottom() {
     setFollow(true);
-    const element = scrollRef.current;
-    if (element) element.scrollTop = element.scrollHeight;
+    timelineEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }
 
   if (agentLoading && !agent) return <TaskSkeleton />;
@@ -438,111 +405,69 @@ export function TaskView({ agentId }: { agentId: string }) {
 
       <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_340px]">
         <section className="min-w-0">
-          <Tabs
-            selectedKey={view}
-            onSelectionChange={(key) => setView(String(key) === "raw" ? "raw" : "timeline")}
-          >
-            <Card className="border border-separator/50">
-              <Card.Content className="flex flex-wrap items-center gap-3 p-3">
-                <Tabs.ListContainer>
-                  <Tabs.List aria-label="事件视图">
-                    <Tabs.Tab id="timeline" className="whitespace-nowrap">
-                      时间线
-                    </Tabs.Tab>
-                    <Tabs.Tab id="raw" className="whitespace-nowrap">
-                      原始事件
-                    </Tabs.Tab>
-                  </Tabs.List>
-                </Tabs.ListContainer>
+          <div className="mb-3 flex flex-wrap items-center gap-3">
+            <span className="text-sm font-medium">时间线</span>
 
-                <div className="ml-auto flex flex-wrap items-center gap-2">
-                  <Select
-                    aria-label="筛选事件"
-                    selectedKey={filter}
-                    onSelectionChange={(key) =>
-                      setFilter(String(key ?? "all") as EventFilter)
-                    }
-                    className="w-[150px]"
-                  >
-                    <Select.Trigger>
-                      <Select.Value />
-                      <Select.Indicator />
-                    </Select.Trigger>
-                    <Select.Popover>
-                      <ListBox>
-                        <ListBox.Item id="all">全部事件</ListBox.Item>
-                        <ListBox.Item id="important">仅关键事件</ListBox.Item>
-                        <ListBox.Item id="model">模型输出</ListBox.Item>
-                        <ListBox.Item id="tools">工具调用</ListBox.Item>
-                        <ListBox.Item id="status">状态与终态</ListBox.Item>
-                      </ListBox>
-                    </Select.Popover>
-                  </Select>
-
-                  <Input
-                    aria-label="搜索事件"
-                    placeholder="搜索事件…"
-                    value={query}
-                    onChange={(event) => setQuery(event.target.value)}
-                    className="h-9 w-[200px] rounded-xl border-separator/80 bg-background/40 text-xs"
-                  />
-
-                  {view === "timeline" ? (
-                    <Switch
-                      isSelected={follow}
-                      onChange={setFollow}
-                      size="sm"
-                      aria-label="跟随最新事件"
-                    >
-                      <Switch.Content>
-                        <Switch.Control>
-                          <Switch.Thumb />
-                        </Switch.Control>
-                        <span className="text-[11px] text-muted">跟随最新</span>
-                      </Switch.Content>
-                    </Switch>
-                  ) : null}
-
-                  {!follow && view === "timeline" ? (
-                    <Button variant="ghost" size="sm" onPress={scrollToBottom}>
-                      回到底部 ↓
-                    </Button>
-                  ) : null}
-                </div>
-              </Card.Content>
-            </Card>
-
-            <Tabs.Panel id="timeline" className="mt-3">
-              <div
-                ref={scrollRef}
-                onScroll={() => {
-                  const element = scrollRef.current;
-                  if (!element) return;
-                  const nearBottom =
-                    element.scrollHeight - element.scrollTop - element.clientHeight < 80;
-                  setFollow(nearBottom);
-                }}
-                className="max-h-[calc(100dvh-360px)] min-h-[360px] overflow-y-auto pr-1"
+            <div className="ml-auto flex flex-wrap items-center gap-2">
+              <Select
+                aria-label="筛选事件"
+                selectedKey={filter}
+                onSelectionChange={(key) =>
+                  setFilter(String(key ?? "all") as EventFilter)
+                }
+                className="w-[150px]"
               >
-                <EventTimeline events={filteredEvents} />
-              </div>
-            </Tabs.Panel>
+                <Select.Trigger>
+                  <Select.Value />
+                  <Select.Indicator />
+                </Select.Trigger>
+                <Select.Popover>
+                  <ListBox>
+                    <ListBox.Item id="all">全部事件</ListBox.Item>
+                    <ListBox.Item id="important">仅关键事件</ListBox.Item>
+                    <ListBox.Item id="model">模型输出</ListBox.Item>
+                    <ListBox.Item id="tools">工具调用</ListBox.Item>
+                    <ListBox.Item id="status">状态与终态</ListBox.Item>
+                  </ListBox>
+                </Select.Popover>
+              </Select>
 
-            <Tabs.Panel id="raw" className="mt-3">
-              <RawEventTable events={filteredEvents} />
-            </Tabs.Panel>
-          </Tabs>
+              <Input
+                aria-label="搜索事件"
+                placeholder="搜索事件…"
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                className="h-9 w-[200px] rounded-xl border-separator/80 bg-background/40 text-xs"
+              />
+
+              <Switch
+                isSelected={follow}
+                onChange={setFollow}
+                size="sm"
+                aria-label="跟随最新事件"
+              >
+                <Switch.Content>
+                  <Switch.Control>
+                    <Switch.Thumb />
+                  </Switch.Control>
+                  <span className="text-[11px] text-muted">跟随最新</span>
+                </Switch.Content>
+              </Switch>
+
+              {!follow ? (
+                <Button variant="ghost" size="sm" onPress={scrollToBottom}>
+                  回到底部 ↓
+                </Button>
+              ) : null}
+            </div>
+          </div>
+
+          <EventTimeline events={filteredEvents} />
+          <div ref={timelineEndRef} aria-hidden="true" className="h-px w-full" />
         </section>
 
         <aside className="space-y-4 lg:sticky lg:top-20 lg:self-start">
           <AgentMeta agent={agent} displayStatus={displayStatus} />
-          <ResultPanel
-            status={displayStatus}
-            result={result}
-            loading={resultLoading}
-            error={resultError}
-            onRetry={() => void loadResult(true)}
-          />
         </aside>
       </div>
 

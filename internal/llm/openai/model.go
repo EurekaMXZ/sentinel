@@ -74,7 +74,8 @@ func (m *Model) Complete(ctx context.Context, request responses.ResponseNewParam
 }
 
 // StreamDelta is the normalized subset of upstream streaming events exposed to
-// the Agent runtime. Reasoning content is never forwarded.
+// the Agent runtime. Only finalized text and function-call arguments are
+// forwarded; token-level deltas never leave the worker.
 type StreamDelta struct {
 	Kind        string `json:"kind"`
 	Text        string `json:"text"`
@@ -82,28 +83,30 @@ type StreamDelta struct {
 	OutputIndex int64  `json:"output_index,omitempty"`
 }
 
-// Stream sends the same Responses request as Complete and forwards bounded text
-// and function-argument deltas. The final completed response is returned in the
-// same shape as Complete so the Activity can persist it unchanged.
+// Stream sends the same Responses request as Complete and forwards finalized
+// text and function-call arguments. The final completed response is returned in
+// the same shape as Complete so the Activity can persist it unchanged.
 func (m *Model) Stream(ctx context.Context, request responses.ResponseNewParams, operationID string, emit func(StreamDelta) error) (Completion, error) {
 	key := sha256.Sum256([]byte(operationID))
 	stream := m.client.Responses.NewStreaming(ctx, request,
 		option.WithHeader("X-Client-Request-Id", hex.EncodeToString(key[:])))
 	defer stream.Close()
 	var final responses.Response
+	textDone := false
 	for stream.Next() {
 		event := stream.Current()
 		switch event.Type {
-		case "response.output_text.delta":
-			if emit != nil && event.Delta != "" {
-				if err := emit(StreamDelta{Kind: "text", Text: event.Delta, ItemID: event.ItemID,
+		case "response.output_text.done":
+			textDone = true
+			if emit != nil && event.Text != "" {
+				if err := emit(StreamDelta{Kind: "text_done", Text: event.Text, ItemID: event.ItemID,
 					OutputIndex: event.OutputIndex}); err != nil {
 					return Completion{}, err
 				}
 			}
-		case "response.function_call_arguments.delta":
-			if emit != nil && event.Delta != "" {
-				if err := emit(StreamDelta{Kind: "arguments", Text: event.Delta, ItemID: event.ItemID,
+		case "response.function_call_arguments.done":
+			if emit != nil && event.Arguments != "" {
+				if err := emit(StreamDelta{Kind: "arguments_done", Text: event.Arguments, ItemID: event.ItemID,
 					OutputIndex: event.OutputIndex}); err != nil {
 					return Completion{}, err
 				}
@@ -126,6 +129,15 @@ func (m *Model) Stream(ctx context.Context, request responses.ResponseNewParams,
 	}
 	if final.ID == "" {
 		return Completion{}, &RequestError{Uncertain: true, cause: errors.New("stream ended without a final response")}
+	}
+	// Some Responses-compatible providers do not emit output_text.done. Keep the
+	// UI working by forwarding the finalized text from the completed response.
+	if !textDone && emit != nil {
+		if text := final.OutputText(); text != "" {
+			if err := emit(StreamDelta{Kind: "text_done", Text: text}); err != nil {
+				return Completion{}, err
+			}
+		}
 	}
 	return Completion{Response: final}, nil
 }

@@ -15,7 +15,6 @@ import {
 } from "@/lib/events";
 import { eventTypeLabel, formatClock, statusLabel } from "@/lib/format";
 import type { AgentEvent } from "@/lib/types";
-import { CopyButton } from "./copy-button";
 
 function ModelBlock({ item }: { item: ModelAttemptItem }) {
   const streaming = item.status === "streaming";
@@ -174,90 +173,57 @@ function StepCard({ step }: { step: StepEntry }) {
   );
 }
 
-function TerminalCard({ event }: { event: AgentEvent }) {
-  const status =
-    event.type === "agent.completed"
-      ? "completed"
-      : event.type === "agent.failed"
-        ? "failed"
-        : "cancelled";
-  const resultRef = eventDataString(event, "result_ref");
-  const code = eventDataString(event, "code");
-  const toneClass =
-    status === "completed"
-      ? "border-success/40 bg-success/5"
-      : status === "failed"
-        ? "border-danger/40 bg-danger/5"
-        : "border-warning/40 bg-warning/5";
-
-  return (
-    <Card className={`border ${toneClass}`}>
-      <Card.Header className="flex-row items-center justify-between gap-3">
-        <div>
-          <Card.Title className="text-sm">
-            {status === "completed"
-              ? "Agent 已完成"
-              : status === "failed"
-                ? "Agent 执行失败"
-                : "Agent 已取消"}
-          </Card.Title>
-          <Card.Description className="text-xs">
-            {formatClock(event.created_at)}
-            {code ? ` · ${code}` : ""}
-          </Card.Description>
-        </div>
-        <Chip
-          size="sm"
-          variant="soft"
-          color={status === "completed" ? "success" : status === "failed" ? "danger" : "warning"}
-        >
-          <Chip.Label>{statusLabel(status)}</Chip.Label>
-        </Chip>
-      </Card.Header>
-      {resultRef ? (
-        <Card.Content className="flex flex-row flex-wrap items-center justify-start gap-2 text-left text-[11px] text-muted">
-          <span className="shrink-0">结果引用</span>
-          <span className="break-anywhere font-mono text-foreground/70">{resultRef}</span>
-          <CopyButton value={resultRef} className="shrink-0" />
-        </Card.Content>
-      ) : null}
-    </Card>
-  );
-}
-
 function MarkerCard({ marker }: { marker: MarkerEntry }) {
-  if (marker.kind === "terminal") {
-    return <TerminalCard event={marker.event} />;
-  }
-
+  const terminalStatus =
+    marker.kind === "terminal"
+      ? marker.event.type === "agent.completed"
+        ? "completed"
+        : marker.event.type === "agent.failed"
+          ? "failed"
+          : "cancelled"
+      : undefined;
   const status =
-    marker.kind === "status" ? eventDataString(marker.event, "status") : undefined;
+    marker.kind === "status"
+      ? eventDataString(marker.event, "status")
+      : terminalStatus;
+  const code =
+    marker.kind === "terminal" ? eventDataString(marker.event, "code") : undefined;
   const contextVersion =
     marker.kind === "compact"
       ? eventDataNumber(marker.event, "context_version")
       : undefined;
   const label =
-    marker.kind === "compact"
-      ? `Context 已压缩${contextVersion === undefined ? "" : ` → v${contextVersion}`}`
-      : status
-        ? `状态：${statusLabel(status)}`
-        : eventTypeLabel(marker.event.type);
+    marker.kind === "terminal"
+      ? terminalStatus === "completed"
+        ? "Agent 已完成"
+        : terminalStatus === "failed"
+          ? "Agent 执行失败"
+          : "Agent 已取消"
+      : marker.kind === "compact"
+        ? `Context 已压缩${contextVersion === undefined ? "" : ` → v${contextVersion}`}`
+        : status
+          ? `状态：${statusLabel(status)}`
+          : eventTypeLabel(marker.event.type);
+  const dotClass =
+    marker.kind === "terminal"
+      ? terminalStatus === "completed"
+        ? "bg-success"
+        : terminalStatus === "failed"
+          ? "bg-danger"
+          : "bg-warning"
+      : marker.kind === "compact" || status === "waiting"
+        ? "bg-warning"
+        : status === "running"
+          ? "bg-accent"
+          : "bg-muted";
 
   return (
     <div className="flex items-center gap-3 py-0.5 text-[11px] text-muted">
       <span className="h-px flex-1 bg-separator/50" />
       <span className="flex shrink-0 items-center gap-1.5">
-        <span
-          className={[
-            "size-1.5 rounded-full",
-            marker.kind === "compact"
-              ? "bg-warning"
-              : status === "running"
-                ? "bg-accent"
-                : "bg-muted",
-          ].join(" ")}
-        />
-        {label} · {formatClock(marker.event.created_at)}
+        <span className={`size-1.5 rounded-full ${dotClass}`} />
+        {label}
+        {code ? ` · ${code}` : ""} · {formatClock(marker.event.created_at)}
       </span>
       <span className="h-px flex-1 bg-separator/50" />
     </div>
@@ -272,7 +238,7 @@ export function EventTimeline({ events }: { events: AgentEvent[] }) {
       <EmptyState className="px-6 py-16 text-center">
         <p className="text-sm font-medium">还没有可显示的事件</p>
         <p className="mt-1 text-xs text-muted">
-          如果任务已经结束，事件历史可能已超过 Redis 保留期；最终结果仍可在右侧查看。
+          如果任务已经结束，事件历史可能已超过 Redis 保留期；最终结果仍可通过 API 读取。
         </p>
       </EmptyState>
     );
