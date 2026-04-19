@@ -126,6 +126,18 @@ const EVENT_LABELS: Record<string, string> = {
   "agent.cancelled": "Agent 取消",
 };
 
+export function repositoryLabel(url?: string | null): string {
+  if (!url) return "";
+  try {
+    const parsed = new URL(url);
+    const parts = parsed.pathname.replace(/^\/+|\/+$/g, "").split("/");
+    if (parts.length >= 2) return `${parts[0]}/${parts[1].replace(/\.git$/, "")}`;
+    return parsed.pathname;
+  } catch {
+    return url;
+  }
+}
+
 export function eventTypeLabel(type: string): string {
   return EVENT_LABELS[type] ?? type;
 }

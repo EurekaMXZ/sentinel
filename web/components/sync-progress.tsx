@@ -1,4 +1,5 @@
 import { ProgressBar } from "@heroui/react";
+import { Check } from "lucide-react";
 
 import type { AnalysisFlow } from "@/lib/types";
 import { statusLabel } from "@/lib/format";
@@ -58,7 +59,7 @@ export function SyncProgress({ flow }: { flow: AnalysisFlow }) {
                     : "border-separator text-muted",
               ].join(" ")}
             >
-              {step.done ? "✓" : index + 1}
+              {step.done ? <Check size={12} /> : index + 1}
             </span>
             <div className="min-w-0">
               <p className="text-xs font-medium text-foreground">{step.label}</p>

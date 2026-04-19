@@ -58,10 +58,7 @@ export function AgentMeta({
               <span className="min-w-0 break-anywhere font-mono text-[10px]">
                 {agent.agent_id}
               </span>
-              <CopyButton
-                value={agent.agent_id}
-                className="h-5 shrink-0 px-1.5 text-[10px]"
-              />
+              <CopyButton value={agent.agent_id} className="shrink-0" />
             </div>
           </Row>
           <Row label="Workflow">
@@ -69,10 +66,7 @@ export function AgentMeta({
               <span className="min-w-0 break-anywhere font-mono text-[10px]">
                 {agent.workflow_id}
               </span>
-              <CopyButton
-                value={agent.workflow_id}
-                className="h-5 shrink-0 px-1.5 text-[10px]"
-              />
+              <CopyButton value={agent.workflow_id} className="shrink-0" />
             </div>
           </Row>
           <IdRow label="Session" value={agent.session_id} />

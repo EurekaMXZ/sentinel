@@ -38,6 +38,13 @@ NEXT_PUBLIC_TENANT_ID=0194e229-8576-7f42-8f08-3496913847cf
 - `SENTINEL_API_URL` 只在服务端使用；`next.config.ts` 将同源 `/v1/*` 代理到该地址，避免 CORS。
 - `NEXT_PUBLIC_TENANT_ID` 是当前唯一租户。API 还没有认证，所有请求通过 `X-Tenant-ID` 或 SSE 的 `tenant_id` 查询参数传入。
 
+## 界面布局
+
+- 桌面端为固定左侧栏 + workspace：左侧栏包含新建分析、最近任务和租户信息，右侧为页面内容
+- 移动端左侧栏收起为顶部栏和左侧 Drawer
+- 图标统一使用 `lucide-react`，不使用 Unicode 字符或 emoji 充当图标
+- 任务详情通过右侧 Drawer 打开，主 workspace 只保留时间线
+
 ## 页面行为
 
 ### 新建分析

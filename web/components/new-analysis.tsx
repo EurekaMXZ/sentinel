@@ -12,6 +12,12 @@ import {
   Spinner,
   TextArea,
 } from "@heroui/react";
+import {
+  ArrowRight,
+  ChevronRight,
+  CircleAlert,
+  CircleCheck,
+} from "lucide-react";
 
 import { DEFAULT_TASK, shortId } from "@/lib/config";
 import { statusLabel } from "@/lib/format";
@@ -19,7 +25,6 @@ import type { FlowPhase } from "@/lib/types";
 import { useAnalysisFlow } from "@/lib/use-analysis-flow";
 import { SyncProgress } from "./sync-progress";
 import { CopyButton } from "./copy-button";
-import { RecentTasks } from "./recent-tasks";
 
 const PHASE_LABEL: Record<FlowPhase, string> = {
   idle: "待开始",
@@ -136,7 +141,9 @@ function FlowPanel({
 
         {error ? (
           <Alert status="danger">
-            <Alert.Indicator>!</Alert.Indicator>
+            <Alert.Indicator>
+              <CircleAlert size={16} />
+            </Alert.Indicator>
             <Alert.Content>
               <Alert.Title>{error.code}</Alert.Title>
               <Alert.Description>
@@ -165,7 +172,9 @@ function FlowPanel({
           </Alert>
         ) : flow.phase === "done" && agentLink ? (
           <Alert status="success">
-            <Alert.Indicator>✓</Alert.Indicator>
+            <Alert.Indicator>
+              <CircleCheck size={16} />
+            </Alert.Indicator>
             <Alert.Content>
               <Alert.Title>Agent 已创建</Alert.Title>
               <Alert.Description>
@@ -173,8 +182,9 @@ function FlowPanel({
               </Alert.Description>
               <div className="mt-3">
                 <Link href={`/tasks/${agentLink}`}>
-                  <Button variant="primary" size="sm">
-                    打开事件日志 →
+                  <Button variant="primary" size="sm" className="gap-1.5">
+                    打开事件日志
+                    <ArrowRight size={14} />
                   </Button>
                 </Link>
               </div>
@@ -225,7 +235,15 @@ export function NewAnalysis() {
           <Chip color="accent" variant="soft" size="sm">
             <Chip.Label>READ-ONLY AGENT</Chip.Label>
           </Chip>
-          <span className="text-xs text-muted">GitHub → 源码同步 → 只读分析 → 事件流</span>
+          <span className="flex flex-wrap items-center gap-1 text-xs text-muted">
+            GitHub
+            <ChevronRight size={12} />
+            源码同步
+            <ChevronRight size={12} />
+            只读分析
+            <ChevronRight size={12} />
+            事件流
+          </span>
         </div>
         <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">
           让 Agent 读代码，
@@ -261,7 +279,7 @@ export function NewAnalysis() {
                 variant="primary"
                 size="lg"
                 isDisabled={running}
-                className="shrink-0"
+                className="shrink-0 gap-2"
               >
                 {running ? (
                   <span className="flex items-center gap-2">
@@ -269,7 +287,10 @@ export function NewAnalysis() {
                     处理中
                   </span>
                 ) : (
-                  "开始分析 →"
+                  <>
+                    开始分析
+                    <ArrowRight size={16} />
+                  </>
                 )}
               </Button>
             </div>
@@ -304,7 +325,9 @@ export function NewAnalysis() {
             {formError ? (
               <div className="mt-3">
                 <Alert status="danger">
-                  <Alert.Indicator>!</Alert.Indicator>
+                  <Alert.Indicator>
+                    <CircleAlert size={16} />
+                  </Alert.Indicator>
                   <Alert.Content>
                     <Alert.Title>地址不合法</Alert.Title>
                     <Alert.Description>{formError}</Alert.Description>
@@ -334,8 +357,6 @@ export function NewAnalysis() {
       {flow.phase !== "idle" ? (
         <FlowPanel flow={flow} onRetry={retry} onReset={reset} />
       ) : null}
-
-      <RecentTasks />
     </div>
   );
 }

@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { Button } from "@heroui/react";
+import { Check, Copy } from "lucide-react";
 
 export function CopyButton({
   value,
@@ -29,11 +30,12 @@ export function CopyButton({
       type="button"
       variant="ghost"
       size="sm"
+      isIconOnly
       className={className}
       onPress={copy}
       aria-label={label}
     >
-      {copied ? "已复制" : label}
+      {copied ? <Check size={14} /> : <Copy size={14} />}
     </Button>
   );
 }

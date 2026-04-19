@@ -33,6 +33,12 @@ function now(): string {
   return new Date().toISOString();
 }
 
+function notifyAgentsChanged(): void {
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new Event("sentinel:agents-changed"));
+  }
+}
+
 function abortError(): DOMException {
   return new DOMException("Aborted", "AbortError");
 }
@@ -289,6 +295,7 @@ export function useAnalysisFlow(): UseAnalysisFlow {
               task: base.task || DEFAULT_TASK,
               createdAt: now(),
             });
+            notifyAgentsChanged();
             current = { ...current, agentId, phase: "done" };
             update(current);
             router.push(`/tasks/${agentId}?resume=1`);
@@ -304,6 +311,7 @@ export function useAnalysisFlow(): UseAnalysisFlow {
           task: base.task || DEFAULT_TASK,
           createdAt: now(),
         });
+        notifyAgentsChanged();
         current = { ...current, agentId, phase: "done" };
         update(current);
         router.push(`/tasks/${agentId}`);

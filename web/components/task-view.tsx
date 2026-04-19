@@ -5,6 +5,7 @@ import Link from "next/link";
 import {
   Alert,
   Button,
+  Drawer,
   Input,
   ListBox,
   Modal,
@@ -13,6 +14,18 @@ import {
   Spinner,
   Switch,
 } from "@heroui/react";
+import {
+  ArrowDown,
+  ArrowLeft,
+  CircleAlert,
+  CircleCheck,
+  Download,
+  Link2,
+  PanelRight,
+  Play,
+  RefreshCw,
+  XCircle,
+} from "lucide-react";
 
 import { api } from "@/lib/api";
 import { shortId } from "@/lib/config";
@@ -21,9 +34,9 @@ import { formatDuration, isAgentTerminal } from "@/lib/format";
 import type { AgentView } from "@/lib/types";
 import { useAgentStream } from "@/lib/use-agent-stream";
 import { AgentMeta } from "./agent-meta";
-import { ConnectionBadge } from "./connection-badge";
 import { EventTimeline } from "./event-timeline";
 import { StatusChip } from "./status-chip";
+import { StreamStatus } from "./stream-status";
 
 type Notice = {
   tone: "success" | "danger" | "accent" | "warning";
@@ -32,12 +45,10 @@ type Notice = {
 
 function TaskSkeleton() {
   return (
-    <div className="mx-auto w-full max-w-[1500px] space-y-4 px-4 py-8 sm:px-6">
+    <div className="mx-auto w-full max-w-[1200px] space-y-4 px-4 py-8 sm:px-6">
       <Skeleton className="h-7 w-56 rounded-lg" />
-      <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_340px]">
-        <Skeleton className="h-[420px] w-full rounded-2xl" />
-        <Skeleton className="h-[320px] w-full rounded-2xl" />
-      </div>
+      <Skeleton className="h-12 w-full rounded-xl" />
+      <Skeleton className="h-[420px] w-full rounded-2xl" />
     </div>
   );
 }
@@ -46,7 +57,9 @@ function TaskError({ message }: { message: string }) {
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-col items-start px-4 py-16 sm:px-6">
       <Alert status="danger" className="w-full">
-        <Alert.Indicator>!</Alert.Indicator>
+        <Alert.Indicator>
+          <CircleAlert size={16} />
+        </Alert.Indicator>
         <Alert.Content>
           <Alert.Title>无法打开任务</Alert.Title>
           <Alert.Description>{message}</Alert.Description>
@@ -254,8 +267,12 @@ export function TaskView({ agentId }: { agentId: string }) {
     <div className="mx-auto w-full max-w-[1500px] px-4 py-6 sm:px-6 lg:py-8">
       <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          <Link href="/" className="text-xs text-muted hover:text-foreground">
-            ← 新建分析
+          <Link
+            href="/"
+            className="inline-flex items-center gap-1 text-xs text-muted hover:text-foreground"
+          >
+            <ArrowLeft size={14} />
+            新建分析
           </Link>
           <div className="mt-1 flex flex-wrap items-center gap-2">
             <h1 className="text-xl font-semibold tracking-tight">分析任务</h1>
@@ -264,27 +281,94 @@ export function TaskView({ agentId }: { agentId: string }) {
               {shortId(agent.agent_id, 12)}
             </span>
           </div>
-          <p className="mt-1 text-[11px] text-muted">
-            创建于 {new Date(agent.created_at).toLocaleString("zh-CN")} · 已运行{" "}
-            {formatDuration(agent.started_at ?? agent.created_at, agent.finished_at)}
-          </p>
+          <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted">
+            <StreamStatus
+              state={stream.state}
+              error={stream.error}
+              eventCount={stream.events.length}
+              lastEventId={stream.lastEventId}
+            />
+            <span className="text-separator">·</span>
+            <span>创建于 {new Date(agent.created_at).toLocaleString("zh-CN")}</span>
+            <span className="text-separator">·</span>
+            <span>
+              已运行 {formatDuration(agent.started_at ?? agent.created_at, agent.finished_at)}
+            </span>
+          </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
-          <Button variant="secondary" size="sm" onPress={copyLink}>
-            复制链接
+        <div className="flex flex-wrap items-center gap-1.5">
+          <Button
+            isIconOnly
+            variant="secondary"
+            size="sm"
+            aria-label="复制链接"
+            onPress={copyLink}
+          >
+            <Link2 size={16} />
           </Button>
-          <Button variant="secondary" size="sm" onPress={() => void loadAgent()}>
-            刷新
+          <Button
+            isIconOnly
+            variant="secondary"
+            size="sm"
+            aria-label="刷新任务"
+            onPress={() => void loadAgent()}
+          >
+            <RefreshCw size={16} />
+          </Button>
+          <Drawer>
+            <Button
+              isIconOnly
+              variant="secondary"
+              size="sm"
+              aria-label="任务详情"
+            >
+              <PanelRight size={16} />
+            </Button>
+            <Drawer.Backdrop isDismissable>
+              <Drawer.Content placement="right" className="w-[360px] bg-background">
+                <Drawer.Dialog>
+                  <Drawer.Header>
+                    <Drawer.Heading>任务详情</Drawer.Heading>
+                  </Drawer.Header>
+                  <Drawer.Body className="p-4">
+                    <AgentMeta agent={agent} displayStatus={displayStatus} />
+                  </Drawer.Body>
+                </Drawer.Dialog>
+              </Drawer.Content>
+            </Drawer.Backdrop>
+          </Drawer>
+          <Button
+            isIconOnly
+            variant="secondary"
+            size="sm"
+            aria-label="导出 JSONL"
+            onPress={exportEvents}
+            isDisabled={stream.events.length === 0}
+          >
+            <Download size={16} />
           </Button>
           {canResume ? (
-            <Button variant="primary" size="sm" onPress={() => void resume()} isDisabled={busy}>
-              {busy ? <Spinner size="sm" color="current" /> : "恢复 Workflow"}
+            <Button
+              variant="primary"
+              size="sm"
+              className="gap-1.5"
+              onPress={() => void resume()}
+              isDisabled={busy}
+            >
+              {busy ? <Spinner size="sm" color="current" /> : <Play size={14} />}
+              恢复 Workflow
             </Button>
           ) : null}
           {canCancel ? (
             <Modal isOpen={cancelOpen} onOpenChange={setCancelOpen}>
-              <Button variant="danger-soft" size="sm" isDisabled={busy}>
+              <Button
+                variant="danger-soft"
+                size="sm"
+                className="gap-1.5"
+                isDisabled={busy}
+              >
+                <XCircle size={14} />
                 取消任务
               </Button>
               <Modal.Backdrop isDismissable>
@@ -320,30 +404,19 @@ export function TaskView({ agentId }: { agentId: string }) {
               </Modal.Backdrop>
             </Modal>
           ) : null}
-          <Button
-            variant="ghost"
-            size="sm"
-            onPress={exportEvents}
-            isDisabled={stream.events.length === 0}
-          >
-            导出 JSONL
-          </Button>
         </div>
-      </div>
-
-      <div className="mb-3">
-        <ConnectionBadge
-          state={stream.state}
-          error={stream.error}
-          eventCount={stream.events.length}
-          lastEventId={stream.lastEventId}
-        />
       </div>
 
       {notice ? (
         <div className="mb-3">
           <Alert status={notice.tone}>
-            <Alert.Indicator>{notice.tone === "success" ? "✓" : "!"}</Alert.Indicator>
+            <Alert.Indicator>
+              {notice.tone === "success" ? (
+                <CircleCheck size={16} />
+              ) : (
+                <CircleAlert size={16} />
+              )}
+            </Alert.Indicator>
             <Alert.Content>
               <Alert.Description>{notice.text}</Alert.Description>
             </Alert.Content>
@@ -354,7 +427,7 @@ export function TaskView({ agentId }: { agentId: string }) {
       {resumeRequested && !terminal ? (
         <div className="mb-3">
           <Alert status="warning">
-            <Alert.Indicator>!</Alert.Indicator>
+            <Alert.Indicator><CircleAlert size={16} /></Alert.Indicator>
             <Alert.Content>
               <Alert.Title>Workflow 尚未恢复</Alert.Title>
               <Alert.Description>
@@ -369,7 +442,7 @@ export function TaskView({ agentId }: { agentId: string }) {
       {stream.state === "error" ? (
         <div className="mb-3">
           <Alert status="warning">
-            <Alert.Indicator>!</Alert.Indicator>
+            <Alert.Indicator><CircleAlert size={16} /></Alert.Indicator>
             <Alert.Content>
               <Alert.Title>
                 {stream.error?.code === "streaming_disabled"
@@ -394,7 +467,7 @@ export function TaskView({ agentId }: { agentId: string }) {
       {agentError ? (
         <div className="mb-3">
           <Alert status="danger">
-            <Alert.Indicator>!</Alert.Indicator>
+            <Alert.Indicator><CircleAlert size={16} /></Alert.Indicator>
             <Alert.Content>
               <Alert.Title>任务状态刷新失败</Alert.Title>
               <Alert.Description>{agentError}</Alert.Description>
@@ -403,11 +476,8 @@ export function TaskView({ agentId }: { agentId: string }) {
         </div>
       ) : null}
 
-      <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_340px]">
-        <section className="min-w-0">
+      <section className="min-w-0">
           <div className="mb-3 flex flex-wrap items-center gap-3">
-            <span className="text-sm font-medium">时间线</span>
-
             <div className="ml-auto flex flex-wrap items-center gap-2">
               <Select
                 aria-label="筛选事件"
@@ -455,21 +525,17 @@ export function TaskView({ agentId }: { agentId: string }) {
               </Switch>
 
               {!follow ? (
-                <Button variant="ghost" size="sm" onPress={scrollToBottom}>
-                  回到底部 ↓
+                <Button variant="ghost" size="sm" className="gap-1.5" onPress={scrollToBottom}>
+                  <ArrowDown size={14} />
+                  回到底部
                 </Button>
               ) : null}
             </div>
           </div>
 
-          <EventTimeline events={filteredEvents} />
-          <div ref={timelineEndRef} aria-hidden="true" className="h-px w-full" />
-        </section>
-
-        <aside className="space-y-4 lg:sticky lg:top-20 lg:self-start">
-          <AgentMeta agent={agent} displayStatus={displayStatus} />
-        </aside>
-      </div>
+        <EventTimeline events={filteredEvents} />
+        <div ref={timelineEndRef} aria-hidden="true" className="h-px w-full" />
+      </section>
 
     </div>
   );

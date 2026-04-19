@@ -2,6 +2,7 @@
 
 import { useMemo } from "react";
 import { Card, Chip, EmptyState, Spinner } from "@heroui/react";
+import { Bot, Check, CircleAlert, Wrench } from "lucide-react";
 import { Streamdown } from "streamdown";
 
 import {
@@ -21,6 +22,7 @@ function ModelBlock({ item }: { item: ModelAttemptItem }) {
   return (
     <div className="rounded-xl border border-separator/50 bg-background/35 p-3">
       <div className="mb-2 flex flex-wrap items-center gap-2 text-[11px] text-muted">
+        <Bot size={13} />
         <span className="font-medium text-foreground/80">模型输出</span>
         {streaming ? (
           <span className="flex items-center gap-1 text-accent">
@@ -29,10 +31,18 @@ function ModelBlock({ item }: { item: ModelAttemptItem }) {
           </span>
         ) : item.status === "failed" ? (
           <Chip size="sm" color="danger" variant="soft">
-            <Chip.Label>{item.code ?? "失败"}</Chip.Label>
+            <Chip.Label>
+              <span className="flex items-center gap-1">
+                <CircleAlert size={11} />
+                {item.code ?? "失败"}
+              </span>
+            </Chip.Label>
           </Chip>
         ) : (
-          <span className="text-success">完成</span>
+          <span className="flex items-center gap-1 text-success">
+            <Check size={12} />
+            完成
+          </span>
         )}
         {item.startedAt ? <span>· {formatClock(item.startedAt)}</span> : null}
       </div>
@@ -70,7 +80,7 @@ function ToolBlock({ item }: { item: ToolItem }) {
   return (
     <div className="flex items-center justify-between gap-3 rounded-xl border border-separator/50 bg-surface/50 px-3 py-2">
       <div className="flex min-w-0 items-center gap-2">
-        <span className="size-1.5 shrink-0 rounded-full bg-accent" />
+        <Wrench size={12} className="shrink-0 text-accent" />
         <span className="truncate font-mono text-[11px] text-foreground/85">{item.name}</span>
         <span className="shrink-0 text-[10px] text-muted">{formatClock(item.startedAt)}</span>
       </div>
@@ -85,7 +95,12 @@ function ToolBlock({ item }: { item: ToolItem }) {
           color={item.status === "failed" ? "danger" : "success"}
           variant="soft"
         >
-          <Chip.Label>{item.status === "failed" ? "失败" : "完成"}</Chip.Label>
+          <Chip.Label>
+            <span className="flex items-center gap-1">
+              {item.status === "failed" ? <CircleAlert size={11} /> : <Check size={11} />}
+              {item.status === "failed" ? "失败" : "完成"}
+            </span>
+          </Chip.Label>
         </Chip>
       )}
     </div>
@@ -200,7 +215,7 @@ function MarkerCard({ marker }: { marker: MarkerEntry }) {
           ? "Agent 执行失败"
           : "Agent 已取消"
       : marker.kind === "compact"
-        ? `Context 已压缩${contextVersion === undefined ? "" : ` → v${contextVersion}`}`
+        ? `Context 已压缩${contextVersion === undefined ? "" : ` 至 v${contextVersion}`}`
         : status
           ? `状态：${statusLabel(status)}`
           : eventTypeLabel(marker.event.type);
