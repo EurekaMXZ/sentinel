@@ -36,30 +36,18 @@ function StateIcon({ state }: { state: StreamState }) {
 export function StreamStatus({
   state,
   error,
-  eventCount,
-  lastEventId,
 }: {
   state: StreamState;
   error: StreamError | null;
-  eventCount: number;
-  lastEventId: string;
 }) {
-  const title =
-    error?.message ??
-    `${eventCount} 条事件${lastEventId ? ` · 游标 ${lastEventId}` : ""}`;
-
   return (
     <div
-      className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted"
-      title={title}
+      className="flex items-center gap-1.5 text-[11px] text-muted"
+      title={error?.message}
       aria-live="polite"
     >
-      <span className="flex items-center gap-1.5">
-        <StateIcon state={state} />
-        {LABELS[state]}
-      </span>
-      <span className="text-separator">·</span>
-      <span>{eventCount} 条事件</span>
+      <StateIcon state={state} />
+      {LABELS[state]}
     </div>
   );
 }

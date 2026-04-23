@@ -153,9 +153,10 @@ Agent Worker 配置 `REDIS_ADDR` 后，模型 Activity 使用官方 SDK 的 `Res
 流式响应，但不向前端转发 token 级 delta。文本在收到上游 `response.output_text.done`
 后发布一次 `model.text`；如果兼容服务没有该事件，则从 `response.completed` 的最终
 output 补发完整文本。function call 参数在 `response.function_call_arguments.done`
-时发布一次 `model.arguments`。SSE 不再携带 `model.delta`，前端用 Markdown 组件渲染最终文本。
-最终 `response.completed` 响应仍按原路径保存到 S3，Context、检查点和重试语义不变；
-Redis 发布失败只记录告警，不阻断模型调用。
+时发布一次 `model.arguments`。SSE 不再携带 `model.delta`；控制台只把终态步骤的文本渲染成
+Markdown 报告，中间步骤文本按单行纯文本展示。`tool.started` 携带工具名、`call_id` 和完整参数，
+`tool.completed` 携带工具名、`call_id` 和状态，前端用 `call_id` 配对。最终 `response.completed`
+响应仍按原路径保存到 S3，Context、检查点和重试语义不变；Redis 发布失败只记录告警，不阻断模型调用。
 
 同时发布的生命周期事件包括 `agent.status`、`step.completed`、`model.started`、`model.completed`、
 `model.failed`、`tool.started`、`tool.completed`、`context.compacted` 和终态事件。

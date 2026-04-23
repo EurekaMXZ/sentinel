@@ -27,6 +27,18 @@ type toolOutput struct {
 	ResultRef string          `json:"result_ref,omitempty"`
 }
 
+type toolStartedData struct {
+	Tool      string `json:"tool"`
+	CallID    string `json:"call_id"`
+	Arguments string `json:"arguments"`
+}
+
+type toolCompletedData struct {
+	Tool   string `json:"tool"`
+	CallID string `json:"call_id"`
+	Status string `json:"status"`
+}
+
 func (a *Activities) PrepareTool(ctx context.Context, input agent.ToolInput) (agent.ToolPlan, error) {
 	agentRecord, task, err := a.verifyTool(ctx, input)
 	if err != nil {
@@ -79,7 +91,9 @@ func (a *Activities) PrepareTool(ctx context.Context, input agent.ToolInput) (ag
 		return a.toolFailure(ctx, record, failureCode)
 	}
 	a.publishEvent(ctx, input.Step.Session.TenantID, input.Step.Session.AgentID, stream.EventToolStarted,
-		input.Step.StepID, 0, map[string]string{"tool": input.Call.Name})
+		input.Step.StepID, 0, toolStartedData{
+			Tool: input.Call.Name, CallID: input.Call.CallID, Arguments: arguments.JSON,
+		})
 	if input.Call.Name != agent.ChildToolName {
 		if sourceRequest != nil {
 			plan.Source = sourceRequest
@@ -404,8 +418,9 @@ func (a *Activities) saveTool(ctx context.Context, record agent.ToolRecord, outp
 	record, err = a.Store.SaveToolResult(ctx, record)
 	if err == nil {
 		a.publishEvent(ctx, record.Input.Step.Session.TenantID, record.Input.Step.Session.AgentID,
-			stream.EventToolCompleted, record.Input.Step.StepID, 0,
-			map[string]string{"tool": record.Input.Call.Name, "status": record.Status})
+			stream.EventToolCompleted, record.Input.Step.StepID, 0, toolCompletedData{
+				Tool: record.Input.Call.Name, CallID: record.Input.Call.CallID, Status: record.Status,
+			})
 	}
 	return planFor(record), err
 }

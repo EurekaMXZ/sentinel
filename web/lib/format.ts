@@ -109,23 +109,6 @@ export function formatDuration(start?: string | null, end?: string | null): stri
   return `${hours} 小时 ${minutes % 60} 分`;
 }
 
-const EVENT_LABELS: Record<string, string> = {
-  "agent.status": "Agent 状态",
-  "step.completed": "步骤完成",
-  "model.started": "模型开始",
-  "model.text": "模型文本",
-  "model.arguments": "工具参数",
-  "model.delta": "模型增量（旧）",
-  "model.completed": "模型完成",
-  "model.failed": "模型失败",
-  "tool.started": "工具开始",
-  "tool.completed": "工具完成",
-  "context.compacted": "Context 压缩",
-  "agent.completed": "Agent 完成",
-  "agent.failed": "Agent 失败",
-  "agent.cancelled": "Agent 取消",
-};
-
 export function repositoryLabel(url?: string | null): string {
   if (!url) return "";
   try {
@@ -136,18 +119,4 @@ export function repositoryLabel(url?: string | null): string {
   } catch {
     return url;
   }
-}
-
-export function eventTypeLabel(type: string): string {
-  return EVENT_LABELS[type] ?? type;
-}
-
-export function eventTone(type: string): Tone {
-  if (type === "agent.failed" || type === "model.failed") return "danger";
-  if (type === "agent.completed") return "success";
-  if (type === "agent.cancelled") return "warning";
-  if (type === "context.compacted") return "warning";
-  if (type.startsWith("tool.")) return "accent";
-  if (type.startsWith("model.")) return "accent";
-  return "default";
 }

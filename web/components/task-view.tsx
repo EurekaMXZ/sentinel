@@ -7,9 +7,7 @@ import {
   Button,
   Drawer,
   Input,
-  ListBox,
   Modal,
-  Select,
   Skeleton,
   Spinner,
   Switch,
@@ -28,13 +26,14 @@ import {
 } from "lucide-react";
 
 import { api } from "@/lib/api";
-import { shortId } from "@/lib/config";
-import { eventDataString, filterEvents, type EventFilter } from "@/lib/events";
+import { buildConsole } from "@/lib/console";
+import { eventDataString } from "@/lib/events";
 import { formatDuration, isAgentTerminal } from "@/lib/format";
 import type { AgentView } from "@/lib/types";
 import { useAgentStream } from "@/lib/use-agent-stream";
 import { AgentMeta } from "./agent-meta";
-import { EventTimeline } from "./event-timeline";
+import { AnalysisReport } from "./analysis-report";
+import { ConsoleLog } from "./console-log";
 import { StatusChip } from "./status-chip";
 import { StreamStatus } from "./stream-status";
 
@@ -80,7 +79,6 @@ export function TaskView({ agentId }: { agentId: string }) {
   const [agent, setAgent] = useState<AgentView | null>(null);
   const [agentLoading, setAgentLoading] = useState(true);
   const [agentError, setAgentError] = useState<string | null>(null);
-  const [filter, setFilter] = useState<EventFilter>("all");
   const [query, setQuery] = useState("");
   const [follow, setFollow] = useState(true);
   const [notice, setNotice] = useState<Notice | null>(null);
@@ -181,9 +179,17 @@ export function TaskView({ agentId }: { agentId: string }) {
 
   const displayStatus = terminalStatus ?? latestEventStatus ?? agent?.status ?? "pending";
   const terminal = isAgentTerminal(displayStatus);
-  const filteredEvents = useMemo(
-    () => filterEvents(stream.events, filter, query),
-    [stream.events, filter, query],
+  const consoleModel = useMemo(() => buildConsole(stream.events), [stream.events]);
+  const queryText = query.trim().toLowerCase();
+  const visibleLines = useMemo(() => {
+    if (!queryText) return consoleModel.lines;
+    return consoleModel.lines.filter((line) =>
+      JSON.stringify(line).toLowerCase().includes(queryText),
+    );
+  }, [consoleModel.lines, queryText]);
+  const reportVisible = Boolean(
+    consoleModel.report &&
+      (!queryText || consoleModel.report.toLowerCase().includes(queryText)),
   );
 
   const canCancel =
@@ -277,17 +283,9 @@ export function TaskView({ agentId }: { agentId: string }) {
           <div className="mt-1 flex flex-wrap items-center gap-2">
             <h1 className="text-xl font-semibold tracking-tight">分析任务</h1>
             <StatusChip status={displayStatus} size="md" />
-            <span className="font-mono text-[11px] text-muted">
-              {shortId(agent.agent_id, 12)}
-            </span>
           </div>
           <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted">
-            <StreamStatus
-              state={stream.state}
-              error={stream.error}
-              eventCount={stream.events.length}
-              lastEventId={stream.lastEventId}
-            />
+            <StreamStatus state={stream.state} error={stream.error} />
             <span className="text-separator">·</span>
             <span>创建于 {new Date(agent.created_at).toLocaleString("zh-CN")}</span>
             <span className="text-separator">·</span>
@@ -332,7 +330,7 @@ export function TaskView({ agentId }: { agentId: string }) {
                     <Drawer.Heading>任务详情</Drawer.Heading>
                   </Drawer.Header>
                   <Drawer.Body className="p-4">
-                    <AgentMeta agent={agent} displayStatus={displayStatus} />
+                    <AgentMeta agent={agent} />
                   </Drawer.Body>
                 </Drawer.Dialog>
               </Drawer.Content>
@@ -477,66 +475,51 @@ export function TaskView({ agentId }: { agentId: string }) {
       ) : null}
 
       <section className="min-w-0">
-          <div className="mb-3 flex flex-wrap items-center gap-3">
-            <div className="ml-auto flex flex-wrap items-center gap-2">
-              <Select
-                aria-label="筛选事件"
-                selectedKey={filter}
-                onSelectionChange={(key) =>
-                  setFilter(String(key ?? "all") as EventFilter)
-                }
-                className="w-[150px]"
-              >
-                <Select.Trigger>
-                  <Select.Value />
-                  <Select.Indicator />
-                </Select.Trigger>
-                <Select.Popover>
-                  <ListBox>
-                    <ListBox.Item id="all">全部事件</ListBox.Item>
-                    <ListBox.Item id="important">仅关键事件</ListBox.Item>
-                    <ListBox.Item id="model">模型输出</ListBox.Item>
-                    <ListBox.Item id="tools">工具调用</ListBox.Item>
-                    <ListBox.Item id="status">状态与终态</ListBox.Item>
-                  </ListBox>
-                </Select.Popover>
-              </Select>
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          <span className="mr-1 text-xs font-medium text-muted">执行日志</span>
+          <Input
+            aria-label="搜索日志"
+            placeholder="搜索日志…"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            className="h-9 w-[220px] rounded-xl border-separator/80 bg-background/40 text-xs"
+          />
 
-              <Input
-                aria-label="搜索事件"
-                placeholder="搜索事件…"
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                className="h-9 w-[200px] rounded-xl border-separator/80 bg-background/40 text-xs"
-              />
+          <Switch
+            isSelected={follow}
+            onChange={setFollow}
+            size="sm"
+            aria-label="跟随最新事件"
+          >
+            <Switch.Content>
+              <Switch.Control>
+                <Switch.Thumb />
+              </Switch.Control>
+              <span className="text-[11px] text-muted">跟随最新</span>
+            </Switch.Content>
+          </Switch>
 
-              <Switch
-                isSelected={follow}
-                onChange={setFollow}
-                size="sm"
-                aria-label="跟随最新事件"
-              >
-                <Switch.Content>
-                  <Switch.Control>
-                    <Switch.Thumb />
-                  </Switch.Control>
-                  <span className="text-[11px] text-muted">跟随最新</span>
-                </Switch.Content>
-              </Switch>
+          {!follow ? (
+            <Button variant="ghost" size="sm" className="gap-1.5" onPress={scrollToBottom}>
+              <ArrowDown size={14} />
+              回到底部
+            </Button>
+          ) : null}
+        </div>
 
-              {!follow ? (
-                <Button variant="ghost" size="sm" className="gap-1.5" onPress={scrollToBottom}>
-                  <ArrowDown size={14} />
-                  回到底部
-                </Button>
-              ) : null}
-            </div>
-          </div>
-
-        <EventTimeline events={filteredEvents} />
+        <ConsoleLog
+          lines={visibleLines}
+          emptyLabel={
+            queryText
+              ? "没有匹配的日志"
+              : terminal
+                ? "没有可显示的执行记录"
+                : undefined
+          }
+        />
+        <AnalysisReport markdown={reportVisible ? consoleModel.report : undefined} />
         <div ref={timelineEndRef} aria-hidden="true" className="h-px w-full" />
       </section>
-
     </div>
   );
 }

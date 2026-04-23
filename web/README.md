@@ -3,7 +3,7 @@
 Sentinel 的 Next.js 前端。当前提供两个页面：
 
 - `/`：输入 GitHub 仓库地址，完成「注册仓库 → 同步源码 → 选择最新就绪快照 → 创建 Agent」
-- `/tasks/[agentId]`：查看某个分析任务的完整事件日志，支持 SSE 回放、实时追加、时间线筛选和取消/恢复
+- `/tasks/[agentId]`：查看某个分析任务的命令行式执行日志和最终分析报告，支持 SSE 回放、实时追加、搜索和取消/恢复
 
 ## 技术栈
 
@@ -43,7 +43,7 @@ NEXT_PUBLIC_TENANT_ID=0194e229-8576-7f42-8f08-3496913847cf
 - 桌面端为固定左侧栏 + workspace：左侧栏包含新建分析、最近任务和租户信息，右侧为页面内容
 - 移动端左侧栏收起为顶部栏和左侧 Drawer
 - 图标统一使用 `lucide-react`，不使用 Unicode 字符或 emoji 充当图标
-- 任务详情通过右侧 Drawer 打开，主 workspace 只保留时间线
+- 任务详情通过右侧 Drawer 打开，主 workspace 只保留执行日志和最终报告
 
 ## 页面行为
 
@@ -54,18 +54,20 @@ NEXT_PUBLIC_TENANT_ID=0194e229-8576-7f42-8f08-3496913847cf
 3. 触发同步并轮询 `GET /v1/source/syncs/{id}`
 4. 通过 `GET /v1/source/repositories/{id}/versions?limit=1` 取最新 ready 快照
 5. 创建根 Agent，资源绑定为 `source_snapshot`
-6. 跳转事件日志
+6. 跳转任务执行日志
 
 同步中刷新页面后，流程状态会从 localStorage 恢复，可继续等待或恢复未启动的 Workflow。
 
-### 事件日志
+### 执行日志
 
 - SSE 走 `app/stream/agents/[agentId]/route.ts` 专用 Route Handler，直接转发上游 `ReadableStream`；它故意不放在 `/v1` 下，避免被 `/v1/*` rewrite 拦截并缓冲。浏览器请求 `/stream/agents/{id}`。
 - 通过 `fetch` + `ReadableStream` 解析 SSE；首次加载完整回放，断线使用 `last_event_id` 增量续传
-- 按 `step_id` 聚合模型输出和工具调用；`model.text` 在模型文本完成时发送一次最终 Markdown，由 Streamdown 渲染，不再逐 token 更新
-- `model.arguments` 在模型完成时携带完整工具参数；旧历史中的 `model.delta` 仍兼容
-- 事件时间线，支持类型筛选、搜索和导出 JSONL
-- 收到终态事件后关闭流；最终结果仍可通过 `GET /v1/agents/{id}/result` 读取，当前页面不展示结果面板
+- 执行日志采用命令行样式：`[step N]` 标记步骤，`$ tool {...}` 显示工具调用及参数，`> text` 显示模型中间输出；每行一个条目
+- `tool.started` 携带 `call_id` 和完整参数，`tool.completed` 携带状态，前端用 `call_id` 将结果与调用配对
+- `model.text` 在模型文本完成时发送一次；中间步骤文本按纯单行展示，不再逐 token 更新
+- 只有完成状态下的终态步骤文本会作为“分析报告”用 Streamdown 渲染 Markdown；其他内容保持纯文本
+- 旧历史中的 `model.delta` 仍兼容；原始事件不单独展示，可通过导出 JSONL 查看
+- 收到终态事件后关闭流；最终结果仍可通过 `GET /v1/agents/{id}/result` 读取
 - Redis 不可用时降级为轮询；事件超过 `REDIS_STREAM_TTL` 时提示历史已过期
 
 ## 检查
@@ -81,4 +83,4 @@ pnpm typecheck
 - 当前没有认证、租户管理或私有仓库凭据输入
 - 只展示根 Agent 的事件，子 Agent 事件流尚未聚合
 - 事件历史依赖 Redis Stream，超过 TTL 后只能通过 API 读取最终结果
-- 工具事件只包含工具名与状态，参数和结果正文仍在对象存储中
+- 工具事件包含工具名、`call_id` 和完整参数；工具结果正文仍保存在对象存储中，不在事件流里下发

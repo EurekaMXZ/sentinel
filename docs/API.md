@@ -141,7 +141,7 @@ Last-Event-ID: 1729490000000-0
 ```text
 id: 1729490000000-0
 event: model.text
-data: {"type":"model.text","step_id":1,"attempt":1,"data":{"kind":"text","text":"完整的 Markdown 段落\n\n"},"created_at":"2026-10-21T..."}
+data: {"type":"model.text","step_id":1,"attempt":1,"data":{"kind":"text","text":"本次模型调用的完整文本"},"created_at":"2026-10-21T..."}
 ```
 
 - `id` 是 Redis Stream ID，作为 SSE 重连游标；`event` 与 JSON 中的 `type` 相同。
@@ -152,8 +152,11 @@ data: {"type":"model.text","step_id":1,"attempt":1,"data":{"kind":"text","text":
 - `model.text` 携带最终文本，在 Agent Worker 收到上游 `response.output_text.done`
   时发送一次。token 级 `response.output_text.delta` 不再转发。若兼容服务没有发送
   `output_text.done`，Worker 会从 `response.completed` 的最终 output 中补发一次完整文本。
-  前端使用 Markdown 组件渲染该最终文本。
+  前端仅将终态步骤的最终文本渲染为 Markdown 报告，其他步骤文本按纯文本展示。
 - `model.arguments` 在模型调用完成时携带完整的 function call 参数 JSON，不再逐段下发。
+- `tool.started` 的 `data` 包含 `tool`、`call_id` 和完整的 `arguments` JSON 字符串；
+  `tool.completed` 包含 `tool`、`call_id` 和 `status`。客户端可以用 `call_id` 将工具结果
+  与对应调用配对。
 - 旧版本产生的流中可能仍包含 `model.delta`；新客户端可以忽略。推理内容和加密推理
   上下文始终不下发。
 - 收到 `agent.completed`、`agent.failed` 或 `agent.cancelled` 后连接自动关闭。

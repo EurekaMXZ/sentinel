@@ -178,12 +178,12 @@ function FlowPanel({
             <Alert.Content>
               <Alert.Title>Agent 已创建</Alert.Title>
               <Alert.Description>
-                任务已提交，可以打开事件日志查看完整回放和实时输出。
+                任务已提交，可以打开任务查看实时执行过程和最终分析报告。
               </Alert.Description>
               <div className="mt-3">
                 <Link href={`/tasks/${agentLink}`}>
                   <Button variant="primary" size="sm" className="gap-1.5">
-                    打开事件日志
+                    查看分析任务
                     <ArrowRight size={14} />
                   </Button>
                 </Link>
@@ -242,7 +242,7 @@ export function NewAnalysis() {
             <ChevronRight size={12} />
             只读分析
             <ChevronRight size={12} />
-            事件流
+            实时日志
           </span>
         </div>
         <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">
@@ -251,7 +251,7 @@ export function NewAnalysis() {
         </h1>
         <p className="mt-3 max-w-2xl text-sm leading-6 text-muted sm:text-base">
           输入一个公开 GitHub 仓库地址。Sentinel 会同步源码、选择最新就绪版本，
-          启动一个只能读取源码的分析 Agent，并把完整事件日志通过 SSE 回放给你。
+          启动一个只能读取源码的分析 Agent，并实时展示执行过程和最终分析报告。
         </p>
       </section>
 
