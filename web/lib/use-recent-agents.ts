@@ -18,10 +18,14 @@ export function useRecentAgents(limit = 8) {
       if (showLoading) setLoading(true);
       try {
         const [response, repositories] = await Promise.all([
-          api.listAgents(limit),
+          api.listAgents(Math.max(limit * 4, 20)),
           api.listRepositories(200).catch(() => null),
         ]);
-        setAgents(response.agents ?? []);
+        setAgents(
+          (response.agents ?? [])
+            .filter((agent) => !agent.parent_agent_id)
+            .slice(0, limit),
+        );
         setRecent(loadRecent());
         if (repositories) {
           setRepositoryURLs(

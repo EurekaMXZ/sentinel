@@ -235,7 +235,7 @@ func TestMigrationDowngradeGuards(t *testing.T) {
 			if err := tx.Commit(ctx); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := provider.Up(ctx); err != nil {
+			if _, err := provider.UpTo(ctx, 2); err != nil {
 				t.Fatal(err)
 			}
 			tx = beginTx(t, pool)
@@ -248,7 +248,7 @@ func TestMigrationDowngradeGuards(t *testing.T) {
 			if !errors.As(err, &pgErr) || pgErr.Code != "P0001" || !strings.Contains(pgErr.Message, "cannot restore schema v1") {
 				t.Fatalf("incompatible downgrade: got %v, want explicit V1 compatibility error", err)
 			}
-			assertStatus(t, ctx, provider, goose.StateApplied, goose.StateApplied)
+			assertStatus(t, ctx, provider, goose.StateApplied, goose.StateApplied, goose.StatePending)
 			assertTableCount(t, ctx, pool, 19)
 		})
 	}

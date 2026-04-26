@@ -1,5 +1,5 @@
-import { NewAnalysis } from "@/components/new-analysis";
+import { Dashboard } from "@/components/dashboard";
 
 export default function Home() {
-  return <NewAnalysis />;
+  return <Dashboard />;
 }

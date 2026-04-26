@@ -3,7 +3,12 @@ import type { AgentStatus } from "./types";
 export type Tone = "default" | "accent" | "success" | "warning" | "danger";
 
 const STATUS_LABELS: Record<string, string> = {
+  active: "活跃",
+  archived: "已归档",
+  paused: "已暂停",
   pending: "等待调度",
+  resolving: "解析中",
+  ready: "就绪",
   running: "运行中",
   waiting: "等待中",
   cancelling: "取消中",
@@ -23,6 +28,8 @@ export function statusLabel(status: string | undefined): string {
 
 export function statusTone(status: string | undefined): Tone {
   switch (status) {
+    case "active":
+    case "ready":
     case "running":
     case "queued":
     case "archiving":
@@ -33,6 +40,8 @@ export function statusTone(status: string | undefined): Tone {
     case "succeeded":
       return "success";
     case "waiting":
+    case "paused":
+    case "resolving":
       return "warning";
     case "failed":
       return "danger";

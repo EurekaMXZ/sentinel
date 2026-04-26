@@ -2,9 +2,14 @@ import { TENANT_ID } from "./config";
 import type {
   AgentResult,
   AgentView,
+  Analysis,
   CreateAgentRequest,
+  Project,
+  ProjectRepository,
+  RefRecord,
   Repository,
   Snapshot,
+  SyncRecord,
   SyncView,
   VersionPage,
 } from "./types";
@@ -14,6 +19,8 @@ export interface ApiErrorBody {
   code?: string;
   sync_id?: string;
   agent_id?: string;
+  analysis_id?: string;
+  project_id?: string;
   [key: string]: unknown;
 }
 
@@ -97,8 +104,79 @@ export const api = {
     });
   },
 
+  listProjects(limit = 50): Promise<{ projects: Project[] }> {
+    return request(`/v1/projects?limit=${limit}`);
+  },
+
+  createProject(body: { name: string; description?: string }): Promise<Project> {
+    return request("/v1/projects", { method: "POST", body: jsonBody(body) });
+  },
+
+  getProject(projectId: string): Promise<Project> {
+    return request(`/v1/projects/${encodeURIComponent(projectId)}`);
+  },
+
+  updateProject(
+    projectId: string,
+    body: { name?: string; description?: string; status?: string },
+  ): Promise<Project> {
+    return request(`/v1/projects/${encodeURIComponent(projectId)}`, {
+      method: "PATCH",
+      body: jsonBody(body),
+    });
+  },
+
+  addProjectRepository(
+    projectId: string,
+    body: { repository_id: string; is_primary?: boolean },
+  ): Promise<ProjectRepository> {
+    return request(`/v1/projects/${encodeURIComponent(projectId)}/repositories`, {
+      method: "POST",
+      body: jsonBody(body),
+    });
+  },
+
+  removeProjectRepository(projectId: string, repositoryId: string): Promise<void> {
+    return request(
+      `/v1/projects/${encodeURIComponent(projectId)}/repositories/${encodeURIComponent(repositoryId)}`,
+      { method: "DELETE" },
+    );
+  },
+
+  listProjectAnalyses(projectId: string, limit = 50): Promise<{ analyses: Analysis[] }> {
+    return request(
+      `/v1/projects/${encodeURIComponent(projectId)}/analyses?limit=${limit}`,
+    );
+  },
+
+  createAnalysis(
+    projectId: string,
+    body: {
+      repository_id: string;
+      snapshot_id: string;
+      task: string;
+      title?: string;
+      expected_output?: string;
+      max_steps?: number;
+      max_child_depth?: number;
+    },
+  ): Promise<Analysis> {
+    return request(`/v1/projects/${encodeURIComponent(projectId)}/analyses`, {
+      method: "POST",
+      body: jsonBody(body),
+    });
+  },
+
+  getAnalysis(analysisId: string): Promise<Analysis> {
+    return request(`/v1/analyses/${encodeURIComponent(analysisId)}`);
+  },
+
   listRepositories(limit = 200): Promise<{ repositories: Repository[] }> {
     return request(`/v1/source/repositories?limit=${limit}`);
+  },
+
+  getRepository(repositoryId: string): Promise<Repository> {
+    return request(`/v1/source/repositories/${encodeURIComponent(repositoryId)}`);
   },
 
   createRepository(body: {
@@ -111,6 +189,34 @@ export const api = {
       method: "POST",
       body: jsonBody(body),
     });
+  },
+
+  updateRepository(
+    repositoryId: string,
+    body: { tracked_refs?: string[]; credential_ref?: string; status?: string },
+  ): Promise<Repository> {
+    return request(`/v1/source/repositories/${encodeURIComponent(repositoryId)}`, {
+      method: "PATCH",
+      body: jsonBody(body),
+    });
+  },
+
+  listRepositoryRefs(
+    repositoryId: string,
+    limit = 200,
+  ): Promise<{ repository_id: string; refs: RefRecord[] }> {
+    return request(
+      `/v1/source/repositories/${encodeURIComponent(repositoryId)}/refs?limit=${limit}`,
+    );
+  },
+
+  listRepositorySyncs(
+    repositoryId: string,
+    limit = 50,
+  ): Promise<{ repository_id: string; syncs: SyncRecord[] }> {
+    return request(
+      `/v1/source/repositories/${encodeURIComponent(repositoryId)}/syncs?limit=${limit}`,
+    );
   },
 
   createSync(repositoryId: string): Promise<SyncView> {

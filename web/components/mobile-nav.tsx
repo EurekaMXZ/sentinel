@@ -1,10 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { Button, Chip, Drawer, useOverlayState } from "@heroui/react";
+import { Button, Drawer, useOverlayState } from "@heroui/react";
 import { Menu, ScanSearch } from "lucide-react";
 
-import { TENANT_ID, shortId } from "@/lib/config";
 import { SidebarContent } from "./app-sidebar";
 
 export function MobileNav() {
@@ -41,17 +40,7 @@ export function MobileNav() {
         <span className="text-sm font-semibold">Sentinel</span>
       </Link>
 
-      <div className="ml-auto">
-        <Chip
-          size="sm"
-          variant="soft"
-          color="default"
-          title={TENANT_ID}
-          className="font-mono"
-        >
-          <Chip.Label>租户 {shortId(TENANT_ID)}</Chip.Label>
-        </Chip>
-      </div>
+      <span className="ml-auto text-[11px] text-muted">项目 · 仓库 · 分析</span>
     </header>
   );
 }

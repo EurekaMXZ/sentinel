@@ -1,8 +1,11 @@
 # Sentinel Web
 
-Sentinel 的 Next.js 前端。当前提供两个页面：
+Sentinel 的 Next.js 前端。当前提供：
 
-- `/`：输入 GitHub 仓库地址，完成「注册仓库 → 同步源码 → 选择最新就绪快照 → 创建 Agent」
+- `/`：项目概览和最近分析
+- `/projects`、`/projects/[projectId]`：项目创建、编辑、仓库绑定和分析记录
+- `/repositories`、`/repositories/[repositoryId]`：GitHub 仓库注册、配置、refs、同步历史、快照
+- `/new`：从项目 → 仓库 → 已就绪 commit 快照创建分析
 - `/tasks/[agentId]`：查看某个分析任务的命令行式执行日志和最终分析报告，支持 SSE 回放、实时追加、搜索和取消/恢复
 
 ## 技术栈
@@ -40,23 +43,30 @@ NEXT_PUBLIC_TENANT_ID=0194e229-8576-7f42-8f08-3496913847cf
 
 ## 界面布局
 
-- 桌面端为固定左侧栏 + workspace：左侧栏包含新建分析、最近任务和租户信息，右侧为页面内容
+- 桌面端为固定左侧栏 + workspace：左侧栏包含概览、项目、仓库、新建分析和最近分析
 - 移动端左侧栏收起为顶部栏和左侧 Drawer
 - 图标统一使用 `lucide-react`，不使用 Unicode 字符或 emoji 充当图标
 - 任务详情通过右侧 Drawer 打开，主 workspace 只保留执行日志和最终报告
 
 ## 页面行为
 
+### 项目和仓库
+
+- 项目承载仓库绑定和分析记录；同一仓库可以绑定到多个项目
+- 仓库在租户内只注册一次，默认跟踪所有分支和标签
+- 仓库详情支持修改 tracked refs、凭据引用和状态，手动同步，查看 refs、同步历史和最近快照
+- 只允许 `active` 仓库发起同步或创建分析；归档项目不能创建新分析
+- 分析目标固定为选中的 `source_snapshot`，后续分支更新不会改变已有分析
+
 ### 新建分析
 
-1. 校验 GitHub HTTPS 仓库地址
-2. 复用同租户下已注册的同 URL 仓库，否则创建
-3. 触发同步并轮询 `GET /v1/source/syncs/{id}`
-4. 通过 `GET /v1/source/repositories/{id}/versions?limit=1` 取最新 ready 快照
-5. 创建根 Agent，资源绑定为 `source_snapshot`
-6. 跳转任务执行日志
+1. 选择项目
+2. 选择项目已绑定的 `active` 仓库
+3. 从该仓库的 ready 快照中选择一个 commit
+4. 提交任务，服务端创建根 Agent 并写入项目分析记录
+5. 跳转 `/tasks/[agentId]`
 
-同步中刷新页面后，流程状态会从 localStorage 恢复，可继续等待或恢复未启动的 Workflow。
+创建分析不会隐式注册仓库或触发同步；仓库必须先在仓库页注册并同步出 ready 快照。
 
 ### 执行日志
 
@@ -80,7 +90,8 @@ pnpm typecheck
 
 ## 已知边界
 
-- 当前没有认证、租户管理或私有仓库凭据输入
+- 当前没有认证或租户管理；私有仓库通过 `credential_ref` 引用 Source Worker 环境变量
+- 当前只支持从已就绪快照选择 commit；PR 目标解析和 GitHub Actions 回调尚未接入
 - 只展示根 Agent 的事件，子 Agent 事件流尚未聚合
 - 事件历史依赖 Redis Stream，超过 TTL 后只能通过 API 读取最终结果
 - 工具事件包含工具名、`call_id` 和完整参数；工具结果正文仍保存在对象存储中，不在事件流里下发

@@ -19,7 +19,7 @@ export const metadata: Metadata = {
     default: "Sentinel · 只读源码分析",
     template: "%s · Sentinel",
   },
-  description: "输入 GitHub 仓库地址，启动只读源码分析 Agent，实时查看执行日志和最终分析报告。",
+  description: "管理 GitHub 仓库项目，固定 commit 快照并查看只读源码分析执行日志与最终报告。",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

@@ -1,6 +1,5 @@
-import type { AnalysisFlow, RecentAnalysis } from "./types";
+import type { RecentAnalysis } from "./types";
 
-const FLOW_KEY = "sentinel.analysis-flow.v1";
 const RECENT_KEY = "sentinel.recent-analyses.v1";
 const MAX_RECENT = 12;
 
@@ -21,27 +20,6 @@ function writeJSON(key: string, value: unknown): void {
     window.localStorage.setItem(key, JSON.stringify(value));
   } catch {
     // Storage can be unavailable in private browsing or when the quota is full.
-  }
-}
-
-export function loadFlow(): AnalysisFlow | null {
-  const value = readJSON<AnalysisFlow>(FLOW_KEY);
-  if (!value || typeof value.phase !== "string" || typeof value.updatedAt !== "string") {
-    return null;
-  }
-  return value;
-}
-
-export function saveFlow(flow: AnalysisFlow): void {
-  writeJSON(FLOW_KEY, flow);
-}
-
-export function clearFlow(): void {
-  if (typeof window === "undefined") return;
-  try {
-    window.localStorage.removeItem(FLOW_KEY);
-  } catch {
-    // Ignore unavailable storage.
   }
 }
 

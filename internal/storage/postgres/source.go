@@ -8,6 +8,8 @@ import (
 	"errors"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"sentinel/internal/source"
@@ -40,10 +42,92 @@ func (s *SourceStore) CreateRepository(ctx context.Context, r source.Repository)
 	if err := source.ValidateRepository(r); err != nil {
 		return source.Repository{}, err
 	}
-	return scanRepository(s.pool.QueryRow(ctx, `INSERT INTO source_repositories
+	repository, err := scanRepository(s.pool.QueryRow(ctx, `INSERT INTO source_repositories
 		(repository_id,tenant_id,remote_url,credential_ref,tracked_refs,object_format)
 		VALUES ($1,$2,$3,NULLIF($4,''),$5,$6) RETURNING `+repositoryColumns,
 		r.ID, r.TenantID, r.RemoteURL, r.CredentialRef, r.TrackedRefs, r.ObjectFormat))
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+		return source.Repository{}, source.ErrConflict
+	}
+	return repository, err
+}
+
+func (s *SourceStore) UpdateRepository(ctx context.Context, r source.Repository) (source.Repository, error) {
+	if err := source.ValidateRepository(r); err != nil {
+		return source.Repository{}, err
+	}
+	return scanRepository(s.pool.QueryRow(ctx, `UPDATE source_repositories
+		SET tracked_refs=$3,credential_ref=NULLIF($4,''),status=$5,updated_at=now()
+		WHERE tenant_id=$1 AND repository_id=$2 RETURNING `+repositoryColumns,
+		r.TenantID, r.ID, r.TrackedRefs, r.CredentialRef, r.Status))
+}
+
+func (s *SourceStore) ListRefs(ctx context.Context, tenantID, repositoryID string, limit int) ([]source.RefRecord, error) {
+	if limit <= 0 || limit > 500 {
+		return nil, errors.New("invalid ref page limit")
+	}
+	rows, err := s.pool.Query(ctx, `WITH latest AS (
+			SELECT DISTINCT ON (ref_name) ref_name,target_oid,peeled_commit_sha,observed_at,sync_id,is_deleted
+			FROM source_ref_observations
+			WHERE tenant_id=$1 AND repository_id=$2
+			ORDER BY ref_name,observed_at DESC,sync_id DESC
+		)
+		SELECT l.ref_name,COALESCE(l.target_oid,''),COALESCE(l.peeled_commit_sha,''),
+			l.sync_id::text,l.observed_at,COALESCE(s.snapshot_id::text,''),COALESCE(s.status,'')
+		FROM latest l
+		LEFT JOIN source_snapshots s ON s.tenant_id=$1 AND s.repository_id=$2
+			AND s.commit_sha=l.peeled_commit_sha
+		WHERE NOT l.is_deleted
+		ORDER BY l.ref_name LIMIT $3`, tenantID, repositoryID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	refs := make([]source.RefRecord, 0, limit)
+	for rows.Next() {
+		var ref source.RefRecord
+		if err := rows.Scan(&ref.Name, &ref.TargetOID, &ref.CommitSHA, &ref.SyncID,
+			&ref.ObservedAt, &ref.SnapshotID, &ref.SnapshotStatus); err != nil {
+			return nil, err
+		}
+		refs = append(refs, ref)
+	}
+	return refs, rows.Err()
+}
+
+func (s *SourceStore) ListSyncs(ctx context.Context, tenantID, repositoryID string, limit int) ([]source.SyncRecord, error) {
+	if limit <= 0 || limit > 200 {
+		return nil, errors.New("invalid sync page limit")
+	}
+	rows, err := s.pool.Query(ctx, `SELECT sync_id::text,status,trigger_type,created_at,
+		started_at,finished_at,COALESCE(result_object_id::text,''),COALESCE(error_object_id::text,'')
+		FROM source_sync_jobs
+		WHERE tenant_id=$1 AND repository_id=$2
+		ORDER BY created_at DESC,sync_id DESC LIMIT $3`, tenantID, repositoryID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	syncs := make([]source.SyncRecord, 0, limit)
+	for rows.Next() {
+		var record source.SyncRecord
+		var started, finished pgtype.Timestamptz
+		if err := rows.Scan(&record.SyncID, &record.Status, &record.TriggerType, &record.CreatedAt,
+			&started, &finished, &record.ResultRef, &record.ErrorRef); err != nil {
+			return nil, err
+		}
+		if started.Valid {
+			value := started.Time
+			record.StartedAt = &value
+		}
+		if finished.Valid {
+			value := finished.Time
+			record.FinishedAt = &value
+		}
+		syncs = append(syncs, record)
+	}
+	return syncs, rows.Err()
 }
 
 func (s *SourceStore) LoadRepository(ctx context.Context, tenant, repository string) (source.Repository, error) {

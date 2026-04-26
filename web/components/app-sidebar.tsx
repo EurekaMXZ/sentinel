@@ -2,22 +2,31 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { Button, Chip, Skeleton } from "@heroui/react";
+import { Button, Skeleton } from "@heroui/react";
 import {
   CircleAlert,
   CircleCheck,
   CircleSlash,
   Clock,
+  FolderKanban,
+  GitBranch,
+  LayoutDashboard,
   LoaderCircle,
   Plus,
   RefreshCw,
   ScanSearch,
 } from "lucide-react";
 
-import { TENANT_ID, shortId } from "@/lib/config";
+import { shortId } from "@/lib/config";
 import { formatRelative, repositoryLabel } from "@/lib/format";
 import type { AgentStatus } from "@/lib/types";
 import { useRecentAgents } from "@/lib/use-recent-agents";
+
+const NAV = [
+  { href: "/", label: "概览", icon: LayoutDashboard, exact: true },
+  { href: "/projects", label: "项目", icon: FolderKanban },
+  { href: "/repositories", label: "仓库", icon: GitBranch },
+];
 
 function StatusIcon({ status }: { status: AgentStatus }) {
   switch (status) {
@@ -47,7 +56,7 @@ export function SidebarContent({
 
   function openNewAnalysis() {
     onNavigate?.();
-    router.push("/");
+    router.push("/new");
   }
 
   return (
@@ -76,10 +85,36 @@ export function SidebarContent({
         新建分析
       </Button>
 
-      <div className="mt-6 flex min-h-0 flex-1 flex-col">
+      <nav className="mt-4 space-y-0.5">
+        {NAV.map((item) => {
+          const active = item.exact
+            ? pathname === item.href
+            : pathname === item.href || pathname.startsWith(`${item.href}/`);
+          const Icon = item.icon;
+          return (
+            <Link
+              key={item.href}
+              href={item.href}
+              onClick={onNavigate}
+              aria-current={active ? "page" : undefined}
+              className={[
+                "flex items-center gap-2.5 rounded-lg px-2 py-2 text-xs transition-colors",
+                active
+                  ? "bg-default text-foreground"
+                  : "text-muted hover:bg-default/50 hover:text-foreground",
+              ].join(" ")}
+            >
+              <Icon size={14} />
+              {item.label}
+            </Link>
+          );
+        })}
+      </nav>
+
+      <div className="mt-5 flex min-h-0 flex-1 flex-col">
         <div className="flex items-center justify-between px-2">
           <span className="text-[11px] font-medium uppercase tracking-wider text-muted">
-            最近任务
+            最近分析
           </span>
           <Button
             isIconOnly
@@ -115,7 +150,7 @@ export function SidebarContent({
               </Button>
             </div>
           ) : agents.length === 0 ? (
-            <p className="px-2 pt-2 text-[11px] text-muted">还没有分析任务</p>
+            <p className="px-2 pt-2 text-[11px] text-muted">还没有分析记录</p>
           ) : (
             agents.map((agent) => {
               const meta = recent.find((item) => item.agentId === agent.agent_id);
@@ -153,18 +188,6 @@ export function SidebarContent({
             })
           )}
         </div>
-      </div>
-
-      <div className="mt-4 border-t border-separator/60 pt-3">
-        <Chip
-          size="sm"
-          variant="soft"
-          color="default"
-          title={TENANT_ID}
-          className="max-w-full font-mono"
-        >
-          <Chip.Label>租户 {shortId(TENANT_ID)}</Chip.Label>
-        </Chip>
       </div>
     </div>
   );

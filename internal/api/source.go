@@ -23,6 +23,12 @@ type createRepositoryRequest struct {
 	ObjectFormat  string   `json:"object_format"`
 }
 
+type updateRepositoryRequest struct {
+	TrackedRefs   *[]string `json:"tracked_refs"`
+	CredentialRef *string   `json:"credential_ref"`
+	Status        *string   `json:"status"`
+}
+
 type syncView struct {
 	TenantID      string            `json:"tenant_id"`
 	RepositoryID  string            `json:"repository_id"`
@@ -70,6 +76,10 @@ func createRepository(deps Dependencies, logger *slog.Logger) gin.HandlerFunc {
 			return
 		}
 		repository, err = deps.Sources.CreateRepository(c.Request.Context(), repository)
+		if errors.Is(err, source.ErrConflict) {
+			errorJSON(c, http.StatusConflict, "repository_exists", "this GitHub repository is already registered for the tenant")
+			return
+		}
 		if err != nil {
 			logger.ErrorContext(c.Request.Context(), "create source repository", "error", err)
 			errorJSON(c, http.StatusInternalServerError, "repository_create_failed", "failed to persist the repository")
@@ -112,6 +122,126 @@ func getRepository(deps Dependencies, logger *slog.Logger) gin.HandlerFunc {
 			return
 		}
 		c.JSON(http.StatusOK, repository)
+	}
+}
+
+func updateRepository(deps Dependencies, logger *slog.Logger) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		id, ok := repositoryID(c)
+		if !ok {
+			return
+		}
+		if deps.SourceAdmin == nil {
+			errorJSON(c, http.StatusServiceUnavailable, "repository_management_disabled", "repository management is not configured")
+			return
+		}
+		repository, err := deps.Sources.LoadRepository(c.Request.Context(), tenantID(c), id)
+		if errors.Is(err, source.ErrNotFound) {
+			errorJSON(c, http.StatusNotFound, "repository_not_found", "repository not found")
+			return
+		}
+		if err != nil {
+			logger.ErrorContext(c.Request.Context(), "load source repository for update", "repository_id", id, "error", err)
+			errorJSON(c, http.StatusInternalServerError, "repository_load_failed", "failed to load the repository")
+			return
+		}
+		var request updateRepositoryRequest
+		if err := c.ShouldBindJSON(&request); err != nil {
+			errorJSON(c, http.StatusBadRequest, "invalid_request", "request body must be valid JSON")
+			return
+		}
+		if request.TrackedRefs != nil {
+			repository.TrackedRefs = source.SortedRefs(*request.TrackedRefs)
+		}
+		if request.CredentialRef != nil {
+			repository.CredentialRef = strings.TrimSpace(*request.CredentialRef)
+		}
+		if request.Status != nil {
+			repository.Status = strings.TrimSpace(*request.Status)
+		}
+		if repository.Status != "active" && repository.Status != "paused" && repository.Status != "archived" {
+			errorJSON(c, http.StatusBadRequest, "invalid_repository_status", "status must be active, paused, or archived")
+			return
+		}
+		if err := source.ValidateRepository(repository); err != nil {
+			errorJSON(c, http.StatusBadRequest, "invalid_repository", err.Error())
+			return
+		}
+		repository, err = deps.SourceAdmin.UpdateRepository(c.Request.Context(), repository)
+		if errors.Is(err, source.ErrNotFound) {
+			errorJSON(c, http.StatusNotFound, "repository_not_found", "repository not found")
+			return
+		}
+		if err != nil {
+			logger.ErrorContext(c.Request.Context(), "update source repository", "repository_id", id, "error", err)
+			errorJSON(c, http.StatusInternalServerError, "repository_update_failed", "failed to update the repository")
+			return
+		}
+		c.JSON(http.StatusOK, repository)
+	}
+}
+
+func listRefs(deps Dependencies, logger *slog.Logger) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		id, ok := repositoryID(c)
+		if !ok {
+			return
+		}
+		if deps.SourceAdmin == nil {
+			errorJSON(c, http.StatusServiceUnavailable, "repository_management_disabled", "repository management is not configured")
+			return
+		}
+		if _, err := deps.Sources.LoadRepository(c.Request.Context(), tenantID(c), id); errors.Is(err, source.ErrNotFound) {
+			errorJSON(c, http.StatusNotFound, "repository_not_found", "repository not found")
+			return
+		} else if err != nil {
+			logger.ErrorContext(c.Request.Context(), "load source repository for refs", "repository_id", id, "error", err)
+			errorJSON(c, http.StatusInternalServerError, "repository_load_failed", "failed to load the repository")
+			return
+		}
+		limit, ok := pageLimit(c, 200, 500)
+		if !ok {
+			return
+		}
+		refs, err := deps.SourceAdmin.ListRefs(c.Request.Context(), tenantID(c), id, limit)
+		if err != nil {
+			logger.ErrorContext(c.Request.Context(), "list source refs", "repository_id", id, "error", err)
+			errorJSON(c, http.StatusInternalServerError, "ref_list_failed", "failed to list repository refs")
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"repository_id": id, "refs": refs})
+	}
+}
+
+func listSyncs(deps Dependencies, logger *slog.Logger) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		id, ok := repositoryID(c)
+		if !ok {
+			return
+		}
+		if deps.SourceAdmin == nil {
+			errorJSON(c, http.StatusServiceUnavailable, "repository_management_disabled", "repository management is not configured")
+			return
+		}
+		if _, err := deps.Sources.LoadRepository(c.Request.Context(), tenantID(c), id); errors.Is(err, source.ErrNotFound) {
+			errorJSON(c, http.StatusNotFound, "repository_not_found", "repository not found")
+			return
+		} else if err != nil {
+			logger.ErrorContext(c.Request.Context(), "load source repository for syncs", "repository_id", id, "error", err)
+			errorJSON(c, http.StatusInternalServerError, "repository_load_failed", "failed to load the repository")
+			return
+		}
+		limit, ok := pageLimit(c, 50, 200)
+		if !ok {
+			return
+		}
+		syncs, err := deps.SourceAdmin.ListSyncs(c.Request.Context(), tenantID(c), id, limit)
+		if err != nil {
+			logger.ErrorContext(c.Request.Context(), "list source syncs", "repository_id", id, "error", err)
+			errorJSON(c, http.StatusInternalServerError, "sync_list_failed", "failed to list repository syncs")
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"repository_id": id, "syncs": syncs})
 	}
 }
 

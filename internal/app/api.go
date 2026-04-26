@@ -58,6 +58,7 @@ func openAPIRuntime(ctx context.Context, cfg config.Config, logger *slog.Logger)
 	payloads := s3.NewPayloadStore(objectClient, cfg.S3.Bucket, index)
 	agentStore := postgres.NewAgentStore(pool)
 	sourceStore := postgres.NewSourceStore(pool)
+	controlStore := postgres.NewControlStore(pool)
 	var streamReader stream.Reader
 	var redisStream *stream.Redis
 	if cfg.Redis.Addr != "" {
@@ -75,6 +76,8 @@ func openAPIRuntime(ctx context.Context, cfg config.Config, logger *slog.Logger)
 		AgentResources: agentStore,
 		Sources:        sourceStore,
 		SourceTasks:    &sourceactivity.Activities{Store: sourceStore, Payloads: payloads},
+		SourceAdmin:    sourceStore,
+		Control:        controlStore,
 		Payloads:       payloads,
 		Workflows:      temporalClient,
 		Streams:        streamReader,

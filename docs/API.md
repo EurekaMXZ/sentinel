@@ -20,6 +20,7 @@ API 需要 PostgreSQL、MinIO/S3、Temporal 和 `OPENAI_MODEL`。SSE 还需要 R
 
 - `/healthz` 只表示 HTTP 进程存活。
 - 未实现认证、资源上传、事件/Context 查询和 outbox 投递。仓库内的 `web/` 提供基于本 API 的控制台前端。
+- 项目和分析是控制面概念；底层 Agent 仍通过 `source_snapshot` 资源读取固定版本。
 
 ## Agent
 
@@ -165,6 +166,104 @@ data: {"type":"model.text","step_id":1,"attempt":1,"data":{"kind":"text","text":
 - API 和 Agent Worker 必须配置相同的 `REDIS_ADDR`。API 未配置 Redis 时返回
   `503 streaming_disabled`；Agent Worker 未配置时任务正常执行，但没有流式事件。
 
+## 项目
+
+项目把仓库、分析记录和未来的 GitHub Actions 集成放在一起。仓库是租户级资源，一个仓库可以绑定到多个项目。
+
+### 创建项目
+
+```http
+POST /v1/projects
+X-Tenant-ID: ...
+Content-Type: application/json
+```
+
+```json
+{"name": "支付服务", "description": "支付链路只读代码审查"}
+```
+
+返回 `201` 和项目对象，包含 `project_id`、`status`、`repository_count`、`analysis_count`。
+
+### 查询与更新
+
+```http
+GET /v1/projects?limit=50
+GET /v1/projects/{project_id}
+PATCH /v1/projects/{project_id}
+```
+
+`PATCH` 可以修改 `name`、`description`、`status`（`active` / `archived`）。项目详情中的
+`repositories` 是已绑定仓库列表。
+
+### 绑定和解绑仓库
+
+```http
+POST   /v1/projects/{project_id}/repositories
+DELETE /v1/projects/{project_id}/repositories/{repository_id}
+```
+
+```json
+{"repository_id": "仓库 UUID", "is_primary": true}
+```
+
+解绑不会删除仓库、快照或历史分析。每个项目最多有一个主仓库。
+
+### 创建分析
+
+```http
+POST /v1/projects/{project_id}/analyses
+X-Tenant-ID: ...
+```
+
+```json
+{
+  "repository_id": "已绑定仓库 UUID",
+  "snapshot_id": "已就绪快照 UUID",
+  "title": "可选的展示标题",
+  "task": "只读分析任务",
+  "expected_output": "可选的结果说明",
+  "max_steps": 64,
+  "max_child_depth": 3
+}
+```
+
+`snapshot_id` 省略时使用该仓库最近发布的一个 ready 快照。当前版本创建的是
+`kind=snapshot` 的分析目标；后续 commit / PR 解析会复用同一个分析记录。
+
+返回 `202`：
+
+```json
+{
+  "analysis_id": "...",
+  "project_id": "...",
+  "repository_id": "...",
+  "title": "...",
+  "status": "pending",
+  "agent_id": "...",
+  "workflow_id": "...",
+  "target": {
+    "target_id": "...",
+    "kind": "snapshot",
+    "commit_sha": "...",
+    "source_snapshot_id": "...",
+    "status": "ready"
+  }
+}
+```
+
+Agent 已持久化但 Workflow 启动失败时返回 `502 workflow_start_failed`，响应包含
+`analysis_id` 和 `agent_id`，可使用既有 Agent resume 接口恢复。
+
+### 查询分析
+
+```http
+GET /v1/projects/{project_id}/analyses?limit=50
+GET /v1/analyses/{analysis_id}
+```
+
+分析状态来自 root Agent / session，可为 `pending`、`running`、`waiting`、`completed`、
+`failed`、`cancelled`。分析的目标会固定解析后的 commit 和快照，不随后续同步变化。
+
 ## 源码仓库
 
 ### 注册仓库
@@ -194,6 +293,43 @@ X-Tenant-ID: ...
 GET /v1/source/repositories
 GET /v1/source/repositories/{repository_id}
 ```
+
+同一租户的规范化 `remote_url` 只能注册一次，重复注册返回 `409 repository_exists`。
+
+### 更新仓库配置
+
+```http
+PATCH /v1/source/repositories/{repository_id}
+Content-Type: application/json
+```
+
+```json
+{
+  "tracked_refs": ["refs/heads/*", "refs/tags/*"],
+  "credential_ref": "env:GITHUB_TOKEN",
+  "status": "active"
+}
+```
+
+字段均可省略。`status` 可为 `active`、`paused`、`archived`；只有 `active` 仓库可以发起
+同步或创建分析。仓库地址和 object format 不允许通过此接口修改。
+
+### 查看 refs
+
+```http
+GET /v1/source/repositories/{repository_id}/refs?limit=200
+```
+
+返回每个 ref 最近一次同步观测到的 `target_oid`、`peeled_commit_sha`、`observed_at`，
+以及该 commit 的 ready 快照信息（如果已发布）。该列表用于选择分支、标签或 commit 目标。
+
+### 同步历史
+
+```http
+GET /v1/source/repositories/{repository_id}/syncs?limit=50
+```
+
+返回同步任务的状态、触发方式、创建/开始/结束时间和结果引用。`limit` 最大 200。
 
 ### 触发同步
 
@@ -284,9 +420,10 @@ GET /v1/source/repositories/{repository_id}/versions?offset=0&limit=50
 | 202 | Agent、同步或 resume 已调度 |
 | 400 | 缺少 `X-Tenant-ID`、UUID/参数/JSON 非法、资源不可用 |
 | 404 | Agent、仓库或同步不存在（含跨租户） |
-| 409 | 资源终态、Agent 未完成、Workflow 未启动、仓库非 active |
+| 409 | 资源终态、Agent 未完成、Workflow 未启动、仓库非 active、项目/仓库冲突或项目已归档 |
 | 500 | 数据库或对象存储读取失败 |
 | 502 | Temporal Workflow 调度/取消失败；实体已持久化时可用 resume 恢复 |
+| 503 | 项目管理或仓库管理依赖未配置 |
 
 ## 后续
 

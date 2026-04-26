@@ -6,6 +6,7 @@ import (
 	"go.temporal.io/sdk/client"
 
 	"sentinel/internal/agent"
+	"sentinel/internal/control"
 	"sentinel/internal/source"
 	"sentinel/internal/stream"
 )
@@ -38,6 +39,14 @@ type SourceCreator interface {
 	Create(ctx context.Context, repository source.Repository) (source.SyncJob, error)
 }
 
+// SourceAdmin covers repository management and target lookup for analyses.
+type SourceAdmin interface {
+	UpdateRepository(ctx context.Context, repository source.Repository) (source.Repository, error)
+	LoadSnapshot(ctx context.Context, tenantID, repositoryID, snapshotID string) (source.Snapshot, error)
+	ListRefs(ctx context.Context, tenantID, repositoryID string, limit int) ([]source.RefRecord, error)
+	ListSyncs(ctx context.Context, tenantID, repositoryID string, limit int) ([]source.SyncRecord, error)
+}
+
 type PayloadReader interface {
 	Get(ctx context.Context, tenantID, ref string) ([]byte, error)
 }
@@ -56,6 +65,8 @@ type Dependencies struct {
 	AgentResources  AgentResources
 	Sources         SourceReader
 	SourceTasks     SourceCreator
+	SourceAdmin     SourceAdmin
+	Control         control.Store
 	Payloads        PayloadReader
 	Workflows       Workflows
 	Streams         stream.Reader

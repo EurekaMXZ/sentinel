@@ -117,35 +117,75 @@ export interface CreateAgentRequest {
   max_child_depth?: number;
 }
 
-export type FlowPhase =
-  | "idle"
-  | "registering"
-  | "syncing"
-  | "selecting"
-  | "creating"
-  | "done"
-  | "error";
-
-export interface FlowError {
-  code: string;
-  message: string;
-  step: FlowPhase;
-  syncId?: string;
-  agentId?: string;
-  recoverableSync?: boolean;
+export interface ProjectRepository {
+  repository_id: string;
+  remote_url: string;
+  repository_status: string;
+  tracked_refs: string[];
+  object_format: string;
+  is_primary: boolean;
+  bound_at: string;
 }
 
-export interface AnalysisFlow {
-  phase: FlowPhase;
-  url: string;
-  task: string;
-  repositoryId?: string;
-  syncId?: string;
-  syncStatus?: string;
-  snapshot?: Snapshot;
-  agentId?: string;
-  error?: FlowError;
-  updatedAt: string;
+export interface Project {
+  project_id: string;
+  tenant_id: string;
+  name: string;
+  description: string;
+  status: string;
+  repository_count: number;
+  analysis_count: number;
+  repositories?: ProjectRepository[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AnalysisTarget {
+  target_id: string;
+  kind: "snapshot" | "commit" | "ref" | "pull_request" | string;
+  ref_name?: string;
+  commit_sha?: string;
+  base_commit_sha?: string;
+  pull_request_number?: number;
+  source_snapshot_id?: string;
+  base_snapshot_id?: string;
+  status: string;
+}
+
+export interface Analysis {
+  analysis_id: string;
+  tenant_id: string;
+  project_id: string;
+  repository_id: string;
+  session_id: string;
+  title: string;
+  trigger: string;
+  status: string;
+  agent_id?: string;
+  workflow_id?: string;
+  target?: AnalysisTarget;
+  created_at: string;
+}
+
+export interface RefRecord {
+  ref_name: string;
+  target_oid?: string;
+  commit_sha?: string;
+  sync_id: string;
+  observed_at: string;
+  source_snapshot_id?: string;
+  snapshot_status?: string;
+}
+
+export interface SyncRecord {
+  sync_id: string;
+  status: string;
+  trigger_type: string;
+  created_at: string;
+  started_at?: string;
+  finished_at?: string;
+  result_ref?: string;
+  error_ref?: string;
 }
 
 export interface RecentAnalysis {

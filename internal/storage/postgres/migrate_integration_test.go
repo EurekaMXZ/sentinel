@@ -28,7 +28,7 @@ func TestMigrations(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 	defer cancel()
 	provider := openProvider(t, ctx, dsn)
-	assertStatus(t, ctx, provider, goose.StatePending, goose.StatePending)
+	assertStatus(t, ctx, provider, goose.StatePending, goose.StatePending, goose.StatePending)
 
 	otherProvider := openProvider(t, ctx, dsn)
 	completed := make(chan error, 2)
@@ -46,7 +46,7 @@ func TestMigrations(t *testing.T) {
 	if t.Failed() {
 		t.FailNow()
 	}
-	assertStatus(t, ctx, provider, goose.StateApplied, goose.StateApplied)
+	assertStatus(t, ctx, provider, goose.StateApplied, goose.StateApplied, goose.StateApplied)
 	if results, err := provider.Up(ctx); err != nil || len(results) != 0 {
 		t.Fatalf("repeated up: results=%v, err=%v", results, err)
 	}
@@ -55,14 +55,20 @@ func TestMigrations(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(pool.Close)
-	assertTableCount(t, ctx, pool, 19)
+	assertTableCount(t, ctx, pool, 23)
 	// An empty installation can return to V1, which lets us insert real legacy
 	// rows before testing the data migration instead of only testing empty DDL.
 	result, err := provider.Down(ctx)
-	if err != nil || result == nil || result.Source.Version != 2 {
-		t.Fatalf("empty down: result=%v, err=%v", result, err)
+	if err != nil || result == nil || result.Source.Version != 3 {
+		t.Fatalf("empty down from v3: result=%v, err=%v", result, err)
 	}
-	assertStatus(t, ctx, provider, goose.StateApplied, goose.StatePending)
+	assertStatus(t, ctx, provider, goose.StateApplied, goose.StateApplied, goose.StatePending)
+	assertTableCount(t, ctx, pool, 19)
+	result, err = provider.Down(ctx)
+	if err != nil || result == nil || result.Source.Version != 2 {
+		t.Fatalf("empty down from v2: result=%v, err=%v", result, err)
+	}
+	assertStatus(t, ctx, provider, goose.StateApplied, goose.StatePending, goose.StatePending)
 	assertTableCount(t, ctx, pool, 17)
 	tx, err := pool.Begin(ctx)
 	if err != nil {
@@ -73,7 +79,7 @@ func TestMigrations(t *testing.T) {
 	if err := tx.Commit(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if results, err := provider.Up(ctx); err != nil || len(results) != 1 || results[0].Source.Version != 2 {
+	if results, err := provider.UpTo(ctx, 2); err != nil || len(results) != 1 || results[0].Source.Version != 2 {
 		t.Fatalf("legacy upgrade: results=%v, err=%v", results, err)
 	}
 	assertResourceMigration(t, pool, f)
@@ -88,7 +94,7 @@ func TestMigrations(t *testing.T) {
 	if err != nil || result == nil || result.Source.Version != 2 {
 		t.Fatalf("down: result=%v, err=%v", result, err)
 	}
-	assertStatus(t, ctx, provider, goose.StateApplied, goose.StatePending)
+	assertStatus(t, ctx, provider, goose.StateApplied, goose.StatePending, goose.StatePending)
 	assertTableCount(t, ctx, pool, 17)
 	var repository, sessionSnapshot, agentSnapshot, headSnapshot string
 	err = pool.QueryRow(ctx, `SELECT s.repository_id::text, s.default_source_snapshot_id::text,
@@ -103,10 +109,10 @@ func TestMigrations(t *testing.T) {
 		t.Fatalf("upgrade after legacy downgrade: %v", err)
 	}
 	assertResourceMigration(t, pool, f)
-	if results, err := provider.DownTo(ctx, 0); err != nil || len(results) != 2 {
+	if results, err := provider.DownTo(ctx, 0); err != nil || len(results) != 3 {
 		t.Fatalf("full down: results=%v, err=%v", results, err)
 	}
-	assertStatus(t, ctx, provider, goose.StatePending, goose.StatePending)
+	assertStatus(t, ctx, provider, goose.StatePending, goose.StatePending, goose.StatePending)
 	assertTableCount(t, ctx, pool, 0)
 	if _, err := provider.Down(ctx); !errors.Is(err, goose.ErrNoNextVersion) {
 		t.Fatalf("down at version zero: %v", err)
@@ -114,8 +120,8 @@ func TestMigrations(t *testing.T) {
 	if _, err := provider.Up(ctx); err != nil {
 		t.Fatalf("up after down: %v", err)
 	}
-	assertStatus(t, ctx, provider, goose.StateApplied, goose.StateApplied)
-	assertTableCount(t, ctx, pool, 19)
+	assertStatus(t, ctx, provider, goose.StateApplied, goose.StateApplied, goose.StateApplied)
+	assertTableCount(t, ctx, pool, 23)
 }
 
 func isolatedDatabase(t *testing.T) string {
