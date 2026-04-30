@@ -3,6 +3,7 @@
 -- resources and group analyses; analyses are the control-plane link between a
 -- project, an immutable source target and an Agent session.
 
+-- +goose StatementBegin
 DO $$
 BEGIN
     IF EXISTS (
@@ -15,6 +16,7 @@ BEGIN
     END IF;
 END;
 $$;
+-- +goose StatementEnd
 
 CREATE UNIQUE INDEX source_repositories_tenant_url_idx
     ON source_repositories (tenant_id, remote_url);
